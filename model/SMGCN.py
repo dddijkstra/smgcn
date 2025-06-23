@@ -42,6 +42,9 @@ class SMGCN(nn.Module):
         self.n_layers = len(self.weight_size)
         self.device = args.device
 
+        # 添加对比学习相关参数
+        self.temperature = 0.07  # 对比学习温度参数
+        self.cl_weight = 0.1    # 对比学习损失权重
 
         self.fusion = args.fusion
         print('***********fusion method************ ', self.fusion)
@@ -209,7 +212,7 @@ class SMGCN(nn.Module):
             u_g_embeddings = u_g_embeddings + user_pair_embeddings
         if self.fusion in ['concat']:
             u_g_embeddings = torch.cat([u_g_embeddings, user_pair_embeddings], 1)
-        return u_g_embeddings
+        return u_g_embeddings, user_pair_embeddings
 
     def _create_graphsage_item_embed(self):
         A_fold_hat = self._split_A_hat(self.norm_adj)
@@ -248,7 +251,7 @@ class SMGCN(nn.Module):
         if self.fusion in ['concat']:
             i_g_embeddings = torch.cat([i_g_embeddings, item_pair_embeddings], 1)
 
-        return i_g_embeddings
+        return i_g_embeddings, item_pair_embeddings
 
     def create_batch_rating(self, pos_items, user_embeddings):
         # sum_embeddings = torch.matmul(users, ua_embeddings)
@@ -270,7 +273,7 @@ class SMGCN(nn.Module):
         pos_scores = torch.sigmoid(torch.matmul(user_embeddings, pos_items.transpose(0, 1)))
         return pos_scores
 
-    def create_set2set_loss(self, items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings):
+    def create_set2set_loss(self, items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user=None, cl_loss_item=None):
         # sum_embeddings = torch.matmul(users, ua_embeddings)   # [B, embedding_size]
         #
         # normal_matrix = torch.reciprocal(torch.sum(users, 1))
@@ -307,11 +310,40 @@ class SMGCN(nn.Module):
 
         emb_loss = self.decay * regularizer
 
+        # 计算对比学习损失
+        cl_loss = 0.0
+        if cl_loss_user is not None and cl_loss_item is not None:
+            cl_loss = self.cl_weight * (cl_loss_user + cl_loss_item)
+
         reg_loss = torch.tensor([0.0], dtype=torch.float64, requires_grad=True).to(self.device)
             # torch.nn.init.constant(reg_loss, 0.0)
         # loss = mf_loss + emb_loss + reg_loss
 
-        return mf_loss, emb_loss, reg_loss
+        return mf_loss, emb_loss, reg_loss, cl_loss
+
+    def compute_contrastive_loss(self, view1, view2):
+        """
+        计算对比学习损失
+        Args:
+            view1: 第一个视图的嵌入
+            view2: 第二个视图的嵌入
+        Returns:
+            contrastive_loss: 对比学习损失
+        """
+        # 归一化嵌入
+        view1 = F.normalize(view1, dim=1)
+        view2 = F.normalize(view2, dim=1)
+        
+        # 计算相似度矩阵
+        similarity = torch.matmul(view1, view2.t()) / self.temperature
+        
+        # 正样本对的标签
+        labels = torch.arange(similarity.size(0)).to(self.device)
+        
+        # 计算对比损失
+        loss = F.cross_entropy(similarity, labels)
+        
+        return loss
 
     def forward(self, users, user_set=None, pos_items=None, train=True):
         """
@@ -325,47 +357,49 @@ class SMGCN(nn.Module):
         # todo: todo 应该在主函数中
         if self.alg_type in ['SMGCN']:
             if train:
-                ua_embeddings = self._create_graphsage_user_embed()
-                ia_embeddings = self._create_graphsage_item_embed()
+                # 获取用户和物品的两个视图嵌入
+                u_g_embeddings, user_pair_embeddings = self._create_graphsage_user_embed()
+                i_g_embeddings, item_pair_embeddings = self._create_graphsage_item_embed()
 
-                sum_embeddings = torch.matmul(users, ua_embeddings)  # [B, embedding_size]
+                # 计算用户嵌入
+                sum_embeddings = torch.matmul(users, u_g_embeddings)
                 normal_matrix = torch.reciprocal(torch.sum(users, 1))
-                normal_matrix = normal_matrix.unsqueeze(1)  # [B, 1]
-                # 复制embedding_size列  [B, embedding_size]
+                normal_matrix = normal_matrix.unsqueeze(1)
                 extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
-                # 对应元素相乘
                 user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)
-                # print("*" * 20, "user_embeddings", user_embeddings[0][20:30])
-                all_user_embeddins = torch.index_select(ua_embeddings, 0, user_set)  # []
-                # print("*" * 20, "all_user_embeddings", all_user_embeddins[0][20:30])
-
+                
+                # 获取用户集合的嵌入
+                all_user_embeddins = torch.index_select(u_g_embeddings, 0, user_set)
+                
+                # MLP层处理
                 for k in range(0, self.mlp_predict_n_layers):
                     user_embeddings = F.relu(
                         torch.matmul(user_embeddings, self.weights['W_predict_mlp_user_%d' % k])
                         + self.weights['b_predict_mlp_user_%d' % k])
                     user_embeddings = F.dropout(user_embeddings, self.mess_dropout[k])
-                # print("*" * 20, "user_embeddings", user_embeddings[0])
-                return user_embeddings, all_user_embeddins, ia_embeddings
+
+                # 计算对比学习损失
+                cl_loss_user = self.compute_contrastive_loss(u_g_embeddings, user_pair_embeddings)
+                cl_loss_item = self.compute_contrastive_loss(i_g_embeddings, item_pair_embeddings)
+                
+                return user_embeddings, all_user_embeddins, i_g_embeddings, cl_loss_user, cl_loss_item
             else:
-                ua_embeddings = self._create_graphsage_user_embed()
-                ia_embeddings = self._create_graphsage_item_embed()
+                # 测试阶段不需要计算对比损失
+                u_g_embeddings, _ = self._create_graphsage_user_embed()
+                i_g_embeddings, _ = self._create_graphsage_item_embed()
                 pos_items = torch.tensor(pos_items, dtype=torch.long).to(args.device)
-                pos_i_g_embeddings = torch.index_select(ia_embeddings, 0, pos_items)
-                sum_embeddings = torch.matmul(users, ua_embeddings)
-
+                pos_i_g_embeddings = torch.index_select(i_g_embeddings, 0, pos_items)
+                
+                sum_embeddings = torch.matmul(users, u_g_embeddings)
                 normal_matrix = torch.reciprocal(torch.sum(users, 1))
-
                 normal_matrix = normal_matrix.unsqueeze(1)
-
                 extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
-
                 user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)
-
+                
                 for k in range(0, self.mlp_predict_n_layers):
                     user_embeddings = F.relu(
-                        torch.matmul(user_embeddings,
-                                     self.weights['W_predict_mlp_user_%d' % k]) + self.weights[
-                            'b_predict_mlp_user_%d' % k])
+                        torch.matmul(user_embeddings, self.weights['W_predict_mlp_user_%d' % k])
+                        + self.weights['b_predict_mlp_user_%d' % k])
                     user_embeddings = F.dropout(user_embeddings, self.mess_dropout[k])
                 return user_embeddings, pos_i_g_embeddings
             # else:
