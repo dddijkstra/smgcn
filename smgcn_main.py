@@ -16,7 +16,8 @@ import torch.optim as optim
 
 
 def load_pretrained_data():
-    pretrain_path = '%spretrain/%s/%s.npz' % (args.proj_path, args.dataset, 'embedding')
+    pretrain_path = '%spretrain/%s/%s.npz' % (
+        args.proj_path, args.dataset, 'embedding')
     try:
         pretrain_data = np.load(pretrain_path)
         print('load the pretrained embeddings.')
@@ -24,6 +25,7 @@ def load_pretrained_data():
         pretrain_data = None
     return pretrain_data
 
+from termcolor import colored
 
 if __name__ == '__main__':
     startTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -32,7 +34,6 @@ if __name__ == '__main__':
     print('result_index ', args.result_index)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     args.device = torch.device('cuda:' + str(args.gpu_id))
-
     config = dict()
     config['n_users'] = data_generator.n_users
     config['n_items'] = data_generator.n_items
@@ -44,7 +45,7 @@ if __name__ == '__main__':
     plain_adj, norm_adj, mean_adj, sym_pair_adj, herb_pair_adj = data_generator.get_adj_mat()
     args.node_dropout = eval(args.node_dropout)
     args.mess_dropout = [float(x) for x in eval(args.mess_dropout)]
-
+    print(colored('Epoch is set: '+str(args.epoch), 'red'))
     if args.adj_type == 'plain':
         config['norm_adj'] = plain_adj
         print('use the plain adjacency matrix')
@@ -68,7 +69,8 @@ if __name__ == '__main__':
     else:
         pretrain_data = None
 
-    model = SMGCN(data_config=config, pretrain_data=pretrain_data).to(args.device)
+    model = SMGCN(data_config=config,
+                  pretrain_data=pretrain_data).to(args.device)
     print(model)
 
     """
@@ -106,7 +108,7 @@ if __name__ == '__main__':
 
     for epoch in range(args.epoch):
         t1 = time()
-        loss, mf_loss, emb_loss, reg_loss, cl_loss = 0., 0., 0., 0., 0.
+        loss, mf_loss, emb_loss, reg_loss, cl_loss, cl_user_fusion_loss, cl_item_fusion_loss = 0., 0., 0., 0., 0., 0., 0.
 
         n_batch = data_generator.n_train // args.batch_size + 1
 
@@ -116,25 +118,32 @@ if __name__ == '__main__':
             users = torch.tensor(users, dtype=torch.float32).to(args.device)
             user_set = torch.tensor(user_set, dtype=torch.long).to(args.device)
             items = torch.tensor(items, dtype=torch.float32).to(args.device)
-            item_weights = torch.tensor(data_generator.item_weights, dtype=torch.float32).to(args.device)
+            item_weights = torch.tensor(
+                data_generator.item_weights, dtype=torch.float32).to(args.device)
 
-            # 前向传播，获取用户和物品的嵌入以及对比学习损失
-            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user, cl_loss_item = model(users, user_set)
-            
-            # 计算总损失
+            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user_fusion, cl_loss_item_fusion = model(
+                users, user_set)
+
             batch_mf_loss, batch_emb_loss, batch_reg_loss, batch_cl_loss = \
-                model.create_set2set_loss(items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings,
-                                        cl_loss_user, cl_loss_item)
-            
-            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss
+                model.create_set2set_loss(
+                    items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings)
+            alpha = 0.1
+            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss \
+                + alpha * (cl_loss_user_fusion + cl_loss_item_fusion)
             batch_loss.backward()
             optimizer.step()
 
-            loss += batch_loss.item()
-            mf_loss += batch_mf_loss.item()
-            emb_loss += batch_emb_loss.item()
-            reg_loss += batch_reg_loss.item()
-            cl_loss += batch_cl_loss.item()
+            def to_float(val):
+                import torch
+                return val.item() if isinstance(val, torch.Tensor) else float(val)
+
+            loss += to_float(batch_loss)
+            mf_loss += to_float(batch_mf_loss)
+            emb_loss += to_float(batch_emb_loss)
+            reg_loss += to_float(batch_reg_loss)
+            cl_loss += to_float(batch_cl_loss)
+            cl_user_fusion_loss += to_float(cl_loss_user_fusion)
+            cl_item_fusion_loss += to_float(cl_loss_item_fusion)
 
         if np.isnan(loss) == True:
             print('ERROR: loss is nan.')
@@ -142,14 +151,15 @@ if __name__ == '__main__':
 
         if (epoch + 1) % 10 != 0:
             if args.verbose > 0 and epoch % args.verbose == 0:
-                perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]' % (
-                    epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss)
+                perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f + %.5f]' % (
+                    epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss, cl_user_fusion_loss, cl_item_fusion_loss)
                 print(perf_str)
             continue
 
         t2 = time()
         group_to_test = data_generator.test_group_set
-        ret = test(model, list(data_generator.test_users), group_to_test, drop_flag=True)
+        ret = test(model, list(data_generator.test_users),
+                   group_to_test, drop_flag=True)
         t3 = time()
 
         loss_loger.append(loss)
@@ -159,22 +169,23 @@ if __name__ == '__main__':
         rmrr_loger.append(ret['rmrr'])
 
         if args.verbose > 0:
-            perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
-                      'precision=[%.5f, %.5f],  ndcg=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
-                      (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss, cl_loss,
+            perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
+                'precision=[%.5f, %.5f],  ndcg=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
+                (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss,
                        ret['recall'][0], ret['recall'][-1], ret['precision'][0], ret['precision'][-1],
                        ret['ndcg'][0], ret['ndcg'][-1], ret['rmrr'][0], ret['rmrr'][-1])
             print(perf_str)
 
         cur_best_pre_0, stopping_step, should_stop = no_early_stopping(ret['precision'][0], cur_best_pre_0,
-                                                                     stopping_step, expected_order='acc')
+                                                                       stopping_step, expected_order='acc')
 
         if should_stop == True:
             print('early stopping')
             break
 
         if ret['precision'][0] == cur_best_pre_0 and args.save_flag == 1:
-            print("\n", "*" * 80, "model sava path", weights_save_path + 'model.pkl')
+            print("\n", "*" * 80, "model sava path",
+                  weights_save_path + 'model.pkl')
             torch.save(model, weights_save_path + 'model.pkl')
             print('save the weights in path: ', weights_save_path)
 
@@ -187,13 +198,14 @@ if __name__ == '__main__':
     idx = list(recs[:, 0]).index(best_rec_0)
 
     final_perf = "Best Iter=[%d]@[%.1f]\trecall=[%s], precision=[%s], ndcg=[%s], RMRR=[%s]" % \
-                (idx, time() - t0, '\t'.join(['%.5f' % r for r in recs[idx]]),
-                 '\t'.join(['%.5f' % r for r in pres[idx]]),
-                 '\t'.join(['%.5f' % r for r in ndcgs[idx]]),
+        (idx, time() - t0, '\t'.join(['%.5f' % r for r in recs[idx]]),
+         '\t'.join(['%.5f' % r for r in pres[idx]]),
+         '\t'.join(['%.5f' % r for r in ndcgs[idx]]),
                  '\t'.join(['%.5f' % r for r in rmrr[idx]]))
     print(final_perf)
 
-    save_path = '%soutput/%s/%s.result-SMGCN-%d' % (args.proj_path, args.dataset, model.model_type, args.result_index)
+    save_path = '%soutput/%s/%s.result-SMGCN-%d' % (
+        args.proj_path, args.dataset, model.model_type, args.result_index)
     ensureDir(save_path)
     f = open(save_path, 'a')
     f.write(
