@@ -11,19 +11,17 @@ item_freq_max  9017.0
 #test	 1162
 #双向 sym pairs  1914
 #双向herb pairs  6818
-start  2025-07-19 21:08:51
+start  2025-07-19 21:58:05
 ************SMGCN*************** 
 result_index  1
-already create adjacency matrix (1113, 1113) time: 0.05127549171447754
-already create sym_pair adjacency matrix (360, 360) time: 0.0012774467468261719
-already create herb_pair adjacency matrix (753, 753) time: 0.003284931182861328
+already create adjacency matrix (1113, 1113) time: 0.04974079132080078
+already create sym_pair adjacency matrix (360, 360) time: 0.001192331314086914
+already create herb_pair adjacency matrix (753, 753) time: 0.0029954910278320312
 generate single-normalized adjacency matrix.
 generate single-normalized adjacency matrix.
-already normalize adjacency matrix 0.03838968276977539
+already normalize adjacency matrix 0.037790536880493164
 sym_pair 和 herb_pair 有 self-connection, sum!!
-Epoch is set: 2000
 use the normalized adjacency matrix
-emb_dim:  64
 ***********fusion method************  add
 mlp predict weight  [256]
 mlp_predict layer  1
@@ -55,8 +53,120 @@ SMGCN(
   )
 )
 args.pretrain	 0
-/home/zhang/Projects/Yuan/SMGCN-torch-master/model/SMGCN.py:190: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at  ../torch/csrc/utils/tensor_new.cpp:201.)
+/home/zhang/Projects/Yuan/SMGCN-torch-master/model/SMGCN.py:163: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at  ../torch/csrc/utils/tensor_new.cpp:201.)
   i = torch.tensor([coo.row, coo.col], dtype=torch.long).to(args.device)
-Epoch 0 [3.4s]: train==[7346607.21891=7346578.43750 + 0.00782 + 0.00000 + 0.00000 + 135.39974 + 152.41433]
-Epoch 1 [3.3s]: train==[6166622.39073=6166593.60938 + 0.01627 + 0.00000 + 0.00000 + 135.39904 + 152.41449]
-Epoch 2 [3.3s]: train==[4833621.67164=4833592.89062 + 0.03652 + 0.00000 + 0.00000 + 135.39828 + 152.41181]
+Epoch 0 [3.3s]: train==[2514592.07489=2514588.62305 + 0.30089 + 0.00000 + 3.16962]
+Epoch 1 [3.3s]: train==[177438.89265=177433.32764 + 0.37345 + 0.00000 + 5.19147]
+Epoch 2 [3.3s]: train==[69589.55143=69582.58765 + 0.40512 + 0.00000 + 6.55900]
+Epoch 3 [3.3s]: train==[44849.42535=44841.81458 + 0.41948 + 0.00000 + 7.19110]
+Epoch 4 [3.3s]: train==[31426.78607=31418.76965 + 0.42992 + 0.00000 + 7.58636]
+Epoch 5 [3.4s]: train==[22953.95621=22945.63245 + 0.43917 + 0.00000 + 7.88468]
+Epoch 6 [3.3s]: train==[18837.21826=18828.64935 + 0.44632 + 0.00000 + 8.12268]
+Epoch 7 [3.3s]: train==[15152.78476=15144.01495 + 0.45222 + 0.00000 + 8.31760]
+Epoch 8 [3.3s]: train==[13702.92939=13693.99484 + 0.45865 + 0.00000 + 8.47584]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 9 [3.3s + 5.7s]: train==[11704.77170=11695.69772 + 0.46344 + 0.00000 + 8.61063]
+ recall=[0.00717, 0.01708], precision=[0.00637, 0.00469],  ndcg=[0.00721, 0.00544], RMRR=[0.00368, 0.00493]
+Epoch 10 [3.3s]: train==[10877.85338=10868.66708 + 0.46779 + 0.00000 + 8.71843]
+Epoch 11 [3.3s]: train==[10009.52629=10000.24435 + 0.47157 + 0.00000 + 8.81038]
+Epoch 12 [3.3s]: train==[9328.94440=9319.57983 + 0.47531 + 0.00000 + 8.88932]
+Epoch 13 [3.4s]: train==[8876.60924=8867.17749 + 0.47808 + 0.00000 + 8.95366]
+Epoch 14 [3.3s]: train==[8391.13780=8381.64835 + 0.48136 + 0.00000 + 9.00810]
+Epoch 15 [3.3s]: train==[8208.16812=8198.62991 + 0.48384 + 0.00000 + 9.05438]
+Epoch 16 [3.3s]: train==[7995.40912=7985.82925 + 0.48612 + 0.00000 + 9.09372]
+Epoch 17 [3.3s]: train==[7804.77559=7795.16025 + 0.48886 + 0.00000 + 9.12645]
+Epoch 18 [3.3s]: train==[7898.51066=7888.86600 + 0.49059 + 0.00000 + 9.15407]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 19 [3.4s + 5.7s]: train==[7529.48427=7519.81387 + 0.49229 + 0.00000 + 9.17815]
+ recall=[0.00887, 0.01783], precision=[0.00792, 0.00495],  ndcg=[0.00816, 0.00574], RMRR=[0.00483, 0.00635]
+Epoch 20 [3.3s]: train==[7524.28916=7514.59702 + 0.49478 + 0.00000 + 9.19737]
+Epoch 21 [3.3s]: train==[7527.29766=7517.58710 + 0.49618 + 0.00000 + 9.21438]
+Epoch 22 [3.3s]: train==[7677.33902=7667.61282 + 0.49844 + 0.00000 + 9.22775]
+Epoch 23 [3.4s]: train==[7469.58457=7459.84644 + 0.49930 + 0.00000 + 9.23887]
+Epoch 24 [3.3s]: train==[7111.39065=7101.64182 + 0.50115 + 0.00000 + 9.24761]
+Epoch 25 [3.3s]: train==[7452.76290=7443.00577 + 0.50259 + 0.00000 + 9.25453]
+Epoch 26 [3.3s]: train==[7221.06554=7211.30209 + 0.50385 + 0.00000 + 9.25948]
+Epoch 27 [3.3s]: train==[7270.62168=7260.85458 + 0.50510 + 0.00000 + 9.26200]
+Epoch 28 [3.3s]: train==[7249.88962=7240.12088 + 0.50658 + 0.00000 + 9.26221]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 29 [3.3s + 5.7s]: train==[7138.75295=7128.98358 + 0.50804 + 0.00000 + 9.26128]
+ recall=[0.00996, 0.02024], precision=[0.00861, 0.00568],  ndcg=[0.00927, 0.00664], RMRR=[0.00455, 0.00595]
+Epoch 30 [3.3s]: train==[7330.47299=7320.70566 + 0.50842 + 0.00000 + 9.25893]
+Epoch 31 [3.3s]: train==[7116.54471=7106.77921 + 0.50934 + 0.00000 + 9.25616]
+Epoch 32 [3.3s]: train==[7023.15219=7013.38980 + 0.51033 + 0.00000 + 9.25210]
+Epoch 33 [3.3s]: train==[6972.37448=6962.61685 + 0.51159 + 0.00000 + 9.24616]
+Epoch 34 [3.3s]: train==[7007.22695=6997.47552 + 0.51223 + 0.00000 + 9.23920]
+Epoch 35 [3.3s]: train==[6805.67008=6795.92645 + 0.51247 + 0.00000 + 9.23120]
+Epoch 36 [3.3s]: train==[7008.02719=6998.29089 + 0.51391 + 0.00000 + 9.22239]
+Epoch 37 [3.3s]: train==[6984.07622=6974.34900 + 0.51370 + 0.00000 + 9.21353]
+Epoch 38 [3.3s]: train==[6961.70889=6951.99031 + 0.51462 + 0.00000 + 9.20395]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 39 [3.3s + 5.7s]: train==[6893.55367=6883.84460 + 0.51528 + 0.00000 + 9.19372]
+ recall=[0.01166, 0.02233], precision=[0.01033, 0.00620],  ndcg=[0.01142, 0.00759], RMRR=[0.00560, 0.00738]
+Epoch 40 [3.3s]: train==[6761.44921=6751.75064 + 0.51564 + 0.00000 + 9.18295]
+Epoch 41 [3.3s]: train==[7036.26441=7026.57693 + 0.51643 + 0.00000 + 9.17100]
+Epoch 42 [3.3s]: train==[6880.64380=6870.96806 + 0.51708 + 0.00000 + 9.15872]
+Epoch 43 [3.3s]: train==[6947.85185=6938.18893 + 0.51741 + 0.00000 + 9.14558]
+Epoch 44 [3.3s]: train==[6850.71969=6841.06964 + 0.51721 + 0.00000 + 9.13288]
+Epoch 45 [3.3s]: train==[6915.42958=6905.79198 + 0.51809 + 0.00000 + 9.11949]
+Epoch 46 [3.3s]: train==[7018.38279=7008.75836 + 0.51823 + 0.00000 + 9.10616]
+Epoch 47 [3.3s]: train==[6915.35382=6905.74243 + 0.51851 + 0.00000 + 9.09289]
+Epoch 48 [3.3s]: train==[7026.79076=7017.19266 + 0.51889 + 0.00000 + 9.07918]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 49 [3.3s + 5.7s]: train==[6967.50397=6957.91965 + 0.51943 + 0.00000 + 9.06487]
+ recall=[0.01168, 0.02410], precision=[0.01033, 0.00684],  ndcg=[0.01186, 0.00826], RMRR=[0.00620, 0.00802]
+Epoch 50 [3.3s]: train==[6992.32218=6982.75272 + 0.51922 + 0.00000 + 9.05027]
+Epoch 51 [3.3s]: train==[6828.67879=6819.12383 + 0.51950 + 0.00000 + 9.03542]
+Epoch 52 [3.3s]: train==[6685.92616=6676.38771 + 0.51941 + 0.00000 + 9.01904]
+Epoch 53 [3.3s]: train==[7144.77489=7135.25233 + 0.51977 + 0.00000 + 9.00281]
+Epoch 54 [3.3s]: train==[6662.99651=6653.49002 + 0.51985 + 0.00000 + 8.98660]
+Epoch 55 [3.3s]: train==[6780.75190=6771.26080 + 0.51998 + 0.00000 + 8.97108]
+Epoch 56 [3.3s]: train==[6670.01646=6660.54047 + 0.52040 + 0.00000 + 8.95552]
+Epoch 57 [3.3s]: train==[6613.33475=6603.87578 + 0.51999 + 0.00000 + 8.93900]
+Epoch 58 [3.3s]: train==[6709.47558=6700.03339 + 0.51994 + 0.00000 + 8.92225]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 59 [3.3s + 5.7s]: train==[6702.86487=6693.44031 + 0.51969 + 0.00000 + 8.90479]
+ recall=[0.01184, 0.02573], precision=[0.01067, 0.00744],  ndcg=[0.01203, 0.00878], RMRR=[0.00594, 0.00810]
+Epoch 60 [3.3s]: train==[6919.04848=6909.64151 + 0.51982 + 0.00000 + 8.88710]
+Epoch 61 [3.3s]: train==[7055.58843=7046.19891 + 0.52003 + 0.00000 + 8.86946]
+Epoch 62 [3.3s]: train==[7145.16069=7135.79010 + 0.51978 + 0.00000 + 8.85080]
+Epoch 63 [3.3s]: train==[6832.59903=6823.24680 + 0.51916 + 0.00000 + 8.83304]
+Epoch 64 [3.3s]: train==[6792.33654=6783.00133 + 0.51938 + 0.00000 + 8.81580]
+Epoch 65 [3.3s]: train==[6800.71855=6791.40149 + 0.51963 + 0.00000 + 8.79747]
+Epoch 66 [3.3s]: train==[7060.06011=7050.76208 + 0.51927 + 0.00000 + 8.77873]
+Epoch 67 [3.3s]: train==[6878.59844=6869.31946 + 0.51889 + 0.00000 + 8.76014]
+Epoch 68 [3.3s]: train==[6564.57615=6555.31642 + 0.51860 + 0.00000 + 8.74111]
+drop_flag:  True ,	 mess_dropout:  [0.0, 0.0]
+rate_batch  torch.Size([1162, 753])
+gt_count  8427
+candidate_count  874986
+ideal candidate count  874986
+Epoch 69 [3.3s + 5.7s]: train==[6716.87839=6707.63763 + 0.51806 + 0.00000 + 8.72273]
+ recall=[0.01176, 0.03073], precision=[0.01239, 0.00891],  ndcg=[0.01308, 0.00996], RMRR=[0.00615, 0.00883]
+Epoch 70 [3.3s]: train==[6916.16241=6906.93958 + 0.51837 + 0.00000 + 8.70456]
+Epoch 71 [3.4s]: train==[6919.68186=6910.47887 + 0.51826 + 0.00000 + 8.68479]
+Epoch 72 [3.4s]: train==[6924.53964=6915.35583 + 0.51800 + 0.00000 + 8.66574]
