@@ -25,7 +25,7 @@ BATCH_SIZE = args.batch_size
 
 def test(model, users_to_test, test_group_list, drop_flag=False):
     result = {'precision': np.zeros(len(Ks)), 'recall': np.zeros(len(Ks)),
-              'ndcg': np.zeros(len(Ks)), 'rmrr': np.zeros(len(Ks))}
+              'f1': np.zeros(len(Ks)), 'rmrr': np.zeros(len(Ks))}
     # test_users = users_to_test
     test_users = torch.tensor(users_to_test, dtype=torch.float32).to(args.device)
     item_batch = range(ITEM_NUM)
@@ -55,7 +55,7 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
 
     precision_n = np.zeros(len(Ks))
     recall_n = np.zeros(len(Ks))
-    ndcg_n = np.zeros(len(Ks))
+    f1_n = np.zeros(len(Ks))
     rmrr_n = np.zeros(len(Ks))
     topN = Ks
 
@@ -96,9 +96,11 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
                 if v[a_rank] in herb_results:
                     a_refer = herb_results.index(v[a_rank])  # herb 在推荐列表中的位置a_refer
                     mrr_score += 1.0 / (abs(a_refer - a_rank) + 1)
-            precision_n[ii] = precision_n[ii] + float(number / topN[ii])
-            recall_n[ii] = recall_n[ii] + float(number / len(v))
-            ndcg_n[ii] = ndcg_n[ii] + ndcg_at_k(r, topN[ii])
+            current_precision = float(number / topN[ii])
+            current_recall = float(number / len(v))
+            precision_n[ii] = precision_n[ii] + current_precision
+            recall_n[ii] = recall_n[ii] + current_recall
+            f1_n[ii] = f1_n[ii] + f1_at_k(current_precision, current_recall)
             rmrr_n[ii] = rmrr_n[ii] + mrr_score / len(v)
     print('gt_count ', gt_count)
     print('candidate_count ', candidate_count)
@@ -106,39 +108,83 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
     for ii in range(len(topN)):
         result['precision'][ii] = precision_n[ii] / len(test_group_list)
         result['recall'][ii] = recall_n[ii] / len(test_group_list)
-        result['ndcg'][ii] = ndcg_n[ii] / len(test_group_list)
+        result['f1'][ii] = f1_n[ii] / len(test_group_list)
         result['rmrr'][ii] = rmrr_n[ii] / len(test_group_list)
     return result
 
 
-def dcg_at_k(r, k, method=1):
-    """Score is discounted cumulative gain (dcg)
-    Relevance is positive real values.  Can use binary
-    as the previous methods.
-    Returns:
-        Discounted cumulative gain
-    """
-    r = np.asfarray(r)[:k]
-    if r.size:
-        if method == 0:
-            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
-        elif method == 1:
-            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
-        else:
-            raise ValueError('method must be 0 or 1.')
-    return 0.
 
 
-def ndcg_at_k(r, k, method=1):
-    """Score is normalized discounted cumulative gain (ndcg)
-    Relevance is positive real values.  Can use binary
-    as the previous methods.
+
+def f1_at_k(precision, recall):
+    """Calculate F1 score from precision and recall values.
+    
+    The F1 score is the harmonic mean of precision and recall, providing a balanced
+    measure that considers both metrics equally. It is calculated as:
+    F1 = 2 * (precision * recall) / (precision + recall)
+    
+    Args:
+        precision (float): Precision value, should be in range [0, 1]
+        recall (float): Recall value, should be in range [0, 1]
+    
     Returns:
-        Normalized discounted cumulative gain
+        float: F1 score in range [0, 1]. Returns 0.0 if precision + recall = 0
+               to avoid division by zero.
+    
+    Raises:
+        TypeError: If precision or recall are not numeric types
+        ValueError: If precision or recall are negative or greater than 1,
+                   or if they are NaN or infinite values
+    
+    Examples:
+        >>> f1_at_k(0.5, 0.5)
+        0.5
+        >>> f1_at_k(0.8, 0.6)
+        0.6857142857142857
+        >>> f1_at_k(1.0, 0.0)
+        0.0
+        >>> f1_at_k(0.0, 1.0)
+        0.0
+        >>> f1_at_k(0.0, 0.0)
+        0.0
+        >>> f1_at_k(1.0, 1.0)
+        1.0
     """
-    dcg_max = dcg_at_k(np.ones_like(r), k, method)
-    if not dcg_max:
-        return 0.
-    return dcg_at_k(r, k, method) / dcg_max
+    # Input validation - check if inputs are numeric
+    if not isinstance(precision, (int, float, np.number)):
+        raise TypeError(f"Precision must be a numeric type, got {type(precision)}")
+    if not isinstance(recall, (int, float, np.number)):
+        raise TypeError(f"Recall must be a numeric type, got {type(recall)}")
+    
+    # Convert to float for consistent handling
+    precision = float(precision)
+    recall = float(recall)
+    
+    # Check for NaN or infinite values
+    if np.isnan(precision) or np.isinf(precision):
+        raise ValueError(f"Precision must be a finite number, got {precision}")
+    if np.isnan(recall) or np.isinf(recall):
+        raise ValueError(f"Recall must be a finite number, got {recall}")
+    
+    # Check if values are in valid range [0, 1]
+    if precision < 0 or precision > 1:
+        raise ValueError(f"Precision must be in range [0, 1], got {precision}")
+    if recall < 0 or recall > 1:
+        raise ValueError(f"Recall must be in range [0, 1], got {recall}")
+    
+    # Handle division by zero case
+    if precision + recall == 0:
+        return 0.0
+    
+    # Calculate F1 score
+    f1_score = 2 * (precision * recall) / (precision + recall)
+    
+    # Ensure result is in valid range (should be guaranteed by math, but safety check)
+    f1_score = max(0.0, min(1.0, f1_score))
+    
+    return f1_score
+
+
+
 
 

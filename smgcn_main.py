@@ -102,7 +102,7 @@ if __name__ == '__main__':
     *********************************************************
     Train.
     """
-    loss_loger, pre_loger, rec_loger, ndcg_loger, rmrr_loger = [], [], [], [], []
+    loss_loger, pre_loger, rec_loger, f1_loger, rmrr_loger = [], [], [], [], []
     should_stop = False
 
     for epoch in range(args.epoch):
@@ -161,15 +161,15 @@ if __name__ == '__main__':
         loss_loger.append(loss)
         rec_loger.append(ret['recall'])
         pre_loger.append(ret['precision'])
-        ndcg_loger.append(ret['ndcg'])
+        f1_loger.append(ret['f1'])
         rmrr_loger.append(ret['rmrr'])
 
         if args.verbose > 0:
             perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
-                      'precision=[%.5f, %.5f],  ndcg=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
+                      'precision=[%.5f, %.5f], F1=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
                       (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss, cl_loss,
                        ret['recall'][0], ret['recall'][-1], ret['precision'][0], ret['precision'][-1],
-                       ret['ndcg'][0], ret['ndcg'][-1], ret['rmrr'][0], ret['rmrr'][-1])
+                       ret['f1'][0], ret['f1'][-1], ret['rmrr'][0], ret['rmrr'][-1])
             print(perf_str)
 
         cur_best_pre_0, stopping_step, should_stop = no_early_stopping(ret['precision'][0], cur_best_pre_0,
@@ -186,16 +186,16 @@ if __name__ == '__main__':
 
     recs = np.array(rec_loger)
     pres = np.array(pre_loger)
-    ndcgs = np.array(ndcg_loger)
+    f1s = np.array(f1_loger)
     rmrr = np.array(rmrr_loger)
 
     best_rec_0 = max(recs[:, 0])
     idx = list(recs[:, 0]).index(best_rec_0)
 
-    final_perf = "Best Iter=[%d]@[%.1f]\trecall=[%s], precision=[%s], ndcg=[%s], RMRR=[%s]" % \
+    final_perf = "Best Iter=[%d]@[%.1f]\trecall=[%s], precision=[%s], F1=[%s], RMRR=[%s]" % \
                 (idx, time() - t0, '\t'.join(['%.5f' % r for r in recs[idx]]),
                  '\t'.join(['%.5f' % r for r in pres[idx]]),
-                 '\t'.join(['%.5f' % r for r in ndcgs[idx]]),
+                 '\t'.join(['%.5f' % r for r in f1s[idx]]),
                  '\t'.join(['%.5f' % r for r in rmrr[idx]]))
     print(final_perf)
 
