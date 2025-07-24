@@ -1,0 +1,40 @@
+symtom个数n_users=360, herb个数n_items=753
+#train中的herb个数 train_items 753
+#test中的herb个数 test_items 468
+#总的herb个数 all_items 753
+#用于sample生成batch的train pres 22917
+#train中 症状组合-单个herb pair的个数 n_train 22917, #test 行数 n_test 1162
+item_weight  753
+item_freq_max  9017.0
+753   1
+#multi-hot for test users	 1162
+#test	 1162
+#双向 sym pairs  1914
+#双向herb pairs  6818
+start  2025-07-23 15:51:03
+************SMGCN*************** 
+result_index  1
+already create adjacency matrix (1113, 1113) time: 0.05506587028503418
+already create sym_pair adjacency matrix (360, 360) time: 0.0011737346649169922
+already create herb_pair adjacency matrix (753, 753) time: 0.0030562877655029297
+generate single-normalized adjacency matrix.
+generate single-normalized adjacency matrix.
+already normalize adjacency matrix 0.040352821350097656
+sym_pair 和 herb_pair 有 self-connection, sum!!
+use the normalized adjacency matrix
+***********fusion method************  add
+mlp predict weight  [256]
+mlp_predict layer  1
+regs  [0.007]
+using xavier initialization
+mlp_predict_weight_size_list  [256, 256]
+
+ ########################################################################### pair_dimension is  256
+Traceback (most recent call last):
+  File "smgcn_main.py", line 71, in <module>
+    model = SMGCN(data_config=config, pretrain_data=pretrain_data).to(args.device)
+  File "/home/zhang/Projects/Yuan/SMGCN-torch-master/model/SMGCN.py", line 102, in __init__
+    "/home/zhang/Projects/Yuan/SMGCN-torch-master/data/Herb/hypergraph_node_embeddings.npy"), dtype=torch.float32).to(self.device)
+  File "/home/zhang/miniconda3/envs/py37/lib/python3.7/site-packages/torch/cuda/__init__.py", line 214, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available

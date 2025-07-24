@@ -67,7 +67,8 @@ if __name__ == '__main__':
         pretrain_data = load_pretrained_data()
     else:
         pretrain_data = None
-
+        
+    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = SMGCN(data_config=config, pretrain_data=pretrain_data).to(args.device)
     print(model)
 
@@ -106,7 +107,7 @@ if __name__ == '__main__':
 
     for epoch in range(args.epoch):
         t1 = time()
-        loss, mf_loss, emb_loss, reg_loss, cl_loss = 0., 0., 0., 0., 0.
+        loss, mf_loss, emb_loss, reg_loss, cl_loss,cl_user_fusion_loss,cl_item_fusion_loss = 0., 0., 0., 0., 0.,0.,0.
 
         n_batch = data_generator.n_train // args.batch_size + 1
 
@@ -118,23 +119,28 @@ if __name__ == '__main__':
             items = torch.tensor(items, dtype=torch.float32).to(args.device)
             item_weights = torch.tensor(data_generator.item_weights, dtype=torch.float32).to(args.device)
 
-            # 前向传播，获取用户和物品的嵌入以及对比学习损失
-            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user, cl_loss_item = model(users, user_set)
-            
-            # 计算总损失
+            # 接收三向量两两对比损失
+            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user_total, cl_loss_item_total = model(users, user_set)
+
             batch_mf_loss, batch_emb_loss, batch_reg_loss, batch_cl_loss = \
-                model.create_set2set_loss(items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings,
-                                        cl_loss_user, cl_loss_item)
-            
-            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss
+                model.create_set2set_loss(items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings)
+            alpha = 0.1
+            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss \
+                         + alpha * (cl_loss_user_total + cl_loss_item_total)
             batch_loss.backward()
             optimizer.step()
 
-            loss += batch_loss.item()
-            mf_loss += batch_mf_loss.item()
-            emb_loss += batch_emb_loss.item()
-            reg_loss += batch_reg_loss.item()
-            cl_loss += batch_cl_loss.item()
+            def to_float(val):
+                import torch
+                return val.item() if isinstance(val, torch.Tensor) else float(val)
+
+            loss += to_float(batch_loss)
+            mf_loss += to_float(batch_mf_loss)
+            emb_loss += to_float(batch_emb_loss)
+            reg_loss += to_float(batch_reg_loss)
+            cl_loss += to_float(batch_cl_loss)
+            cl_user_fusion_loss += to_float(cl_loss_user_total)
+            cl_item_fusion_loss += to_float(cl_loss_item_total)
 
         if np.isnan(loss) == True:
             print('ERROR: loss is nan.')

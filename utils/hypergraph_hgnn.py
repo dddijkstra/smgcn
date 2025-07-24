@@ -84,7 +84,7 @@ if __name__ == "__main__":
     X = get_node_features(num_nodes)
 
     # 4. 构建HGNN
-    hgnn = SimpleHGNN(in_dim=num_nodes, hidden_dim=64, out_dim=64, num_layers=2)
+    hgnn = SimpleHGNN(in_dim=num_nodes, hidden_dim=64, out_dim=256, num_layers=2)
 
     # 5. 前向传播，得到节点向量
     node_embeddings = hgnn(X, H)
