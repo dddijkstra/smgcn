@@ -44,7 +44,7 @@ class SMGCN(nn.Module):
 
         # 添加对比学习相关参数
         self.temperature = 0.07  # 对比学习温度参数
-        self.cl_weight = 0.1    # 对比学习损失权重
+        self.cl_weight = args.cl_weight  # 对比学习损失权重，使用命令行参数
 
         self.fusion = args.fusion
         print('***********fusion method************ ', self.fusion)

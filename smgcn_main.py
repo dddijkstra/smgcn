@@ -140,7 +140,7 @@ if __name__ == '__main__':
             print('ERROR: loss is nan.')
             sys.exit()
 
-        if (epoch + 1) % 10 != 0:
+        if (epoch + 1) % 10 != 0 and epoch != args.epoch - 1:
             if args.verbose > 0 and epoch % args.verbose == 0:
                 perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]' % (
                     epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss)
@@ -182,6 +182,12 @@ if __name__ == '__main__':
     pres = np.array(pre_loger)
     ndcgs = np.array(ndcg_loger)
     rmrr = np.array(rmrr_loger)
+
+    if len(rec_loger) == 0:
+        print("No evaluation results available. Training completed without evaluation.")
+        endTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print('end ', endTime)
+        sys.exit()
 
     best_rec_0 = max(recs[:, 0])
     idx = list(recs[:, 0]).index(best_rec_0)

@@ -91,6 +91,10 @@ def parse_args():
                         help='Keep probability w.r.t. message dropout (i.e., 1-dropout_ratio) for each deep layer. 1: no dropout.')
     parser.add_argument('--mess_dropout_link', nargs='?', default='[0.1]',
                         help='Keep probability w.r.t. message dropout (i.e., 1-dropout_ratio) for each deep layer. 1: no dropout.')
+    parser.add_argument('--keep_prob', nargs='?', default='[0.6,0.6]',
+                        help='Keep probability w.r.t. dropout (i.e., 1-dropout_ratio) for each deep layer. 1: no dropout.')
+    parser.add_argument('--loss_type', nargs='?', default='BPR',
+                        help='Specify the loss type from {BPR, BCE}.')
 
 
     parser.add_argument('--Ks', nargs='?', default='[5,10,15,20]',
@@ -100,6 +104,8 @@ def parse_args():
                         help='0: Disable model saver, 1: Activate model saver')
     parser.add_argument('--loss_weight', type=float, default=1.0,
                         help='number:0-1 change different loss')
+    parser.add_argument('--cl_weight', type=float, default=0.1,
+                        help='Weight for contrastive learning loss')
 
 
     parser.add_argument('--test_flag', nargs='?', default='part',
