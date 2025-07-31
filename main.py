@@ -70,6 +70,23 @@ if __name__ == '__main__':
 
     model = SMGCN(data_config=config, pretrain_data=pretrain_data).to(args.device)
     print(model)
+    
+    # 超图功能集成测试
+    print("\n开始测试超图功能集成...")
+    print(f"symtom个数n_users={config['n_users']}, herb个数n_items={config['n_items']}")
+    
+    # 启用超图功能
+    args.use_hypergraph = True
+    model.use_hypergraph = True
+    
+    # 加载草药训练数据并构建超图
+    model.load_herb_train_data()
+    model.build_hypergraph_from_train_data()
+    
+    print("✅ 超图功能集成成功！")
+    print(f"超图邻接矩阵形状: {model.hypergraph_adj.shape if model.hypergraph_adj is not None else 'None'}")
+    print(f"超图嵌入维度: {model.hypergraph_embed_size}")
+    print(f"对比学习权重: {model.contrastive_weight}")
 
     """
     *********************************************************
@@ -106,7 +123,7 @@ if __name__ == '__main__':
 
     for epoch in range(args.epoch):
         t1 = time()
-        loss, mf_loss, emb_loss, reg_loss, cl_loss = 0., 0., 0., 0., 0.
+        loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total = 0., 0., 0., 0., 0., 0.
 
         n_batch = data_generator.n_train // args.batch_size + 1
 
@@ -119,14 +136,17 @@ if __name__ == '__main__':
             item_weights = torch.tensor(data_generator.item_weights, dtype=torch.float32).to(args.device)
 
             # 前向传播，获取用户和物品的嵌入以及对比学习损失
-            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user, cl_loss_item = model(users, user_set)
+            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user, cl_loss_item, cl_loss_hypergraph = model(users, user_set)
             
-            # 计算总损失
+            # 超图对比学习损失已经在forward方法中计算
+            
+            # 计算损失
             batch_mf_loss, batch_emb_loss, batch_reg_loss, batch_cl_loss = \
                 model.create_set2set_loss(items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings,
                                         cl_loss_user, cl_loss_item)
             
-            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss
+            # 添加超图对比学习损失
+            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss + cl_loss_hypergraph
             batch_loss.backward()
             optimizer.step()
 
@@ -135,6 +155,12 @@ if __name__ == '__main__':
             emb_loss += batch_emb_loss.item()
             reg_loss += batch_reg_loss.item()
             cl_loss += batch_cl_loss.item()
+            
+            # 记录超图对比学习损失
+            if isinstance(cl_loss_hypergraph, torch.Tensor):
+                hypergraph_cl_loss_total += cl_loss_hypergraph.item()
+            else:
+                hypergraph_cl_loss_total += cl_loss_hypergraph
 
         if np.isnan(loss) == True:
             print('ERROR: loss is nan.')
@@ -142,8 +168,8 @@ if __name__ == '__main__':
 
         if (epoch + 1) % 10 != 0 and epoch != args.epoch - 1:
             if args.verbose > 0 and epoch % args.verbose == 0:
-                perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]' % (
-                    epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss)
+                perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]' % (
+                    epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total)
                 print(perf_str)
             continue
 
@@ -159,9 +185,9 @@ if __name__ == '__main__':
         rmrr_loger.append(ret['rmrr'])
 
         if args.verbose > 0:
-            perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
+            perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
                       'precision=[%.5f, %.5f],  ndcg=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
-                      (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss, cl_loss,
+                      (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total,
                        ret['recall'][0], ret['recall'][-1], ret['precision'][0], ret['precision'][-1],
                        ret['ndcg'][0], ret['ndcg'][-1], ret['rmrr'][0], ret['rmrr'][-1])
             print(perf_str)

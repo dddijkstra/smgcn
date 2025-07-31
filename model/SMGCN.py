@@ -26,6 +26,7 @@ class SMGCN(nn.Module):
         self.pretrain_data = pretrain_data
         self.n_users = data_config['n_users']
         self.n_items = data_config['n_items']
+        self.data_path = args.data_path + args.dataset
 
         self.n_fold = 100
         self.norm_adj = data_config['norm_adj']
@@ -50,7 +51,8 @@ class SMGCN(nn.Module):
         print('***********fusion method************ ', self.fusion)
 
         self.mlp_predict_weight_size = eval(args.mlp_layer_size)
-        self.mlp_predict_n_layers = len(self.mlp_predict_weight_size)
+        # 添加一个输出层，所以层数需要加1
+        self.mlp_predict_n_layers = len(self.mlp_predict_weight_size) + 1
         print('mlp predict weight ', self.mlp_predict_weight_size)
         print('mlp_predict layer ', self.mlp_predict_n_layers)
         self.model_type += '_%s_%s_l%d' % (self.adj_type, self.alg_type, self.n_layers)
@@ -97,6 +99,166 @@ class SMGCN(nn.Module):
         Compute link prediction loss
         """
         # self._build_loss_phase_II()
+        
+        # 超图相关属性
+        self.hypergraph_adj = None
+        self.use_hypergraph = False
+        self.hypergraph_embed_size = self.emb_dim
+        self.contrastive_weight = 0.1
+        
+        # 加载草药训练数据并构建超图
+        if hasattr(args, 'use_hypergraph') and args.use_hypergraph:
+            self.use_hypergraph = True
+            self.load_herb_train_data()
+            self.build_hypergraph_from_train_data()
+    
+    def load_herb_train_data(self):
+        """加载草药训练数据"""
+        import os
+        
+        # 加载训练数据
+        train_file = os.path.join(self.data_path, 'train.txt')
+        self.train_data = []
+        with open(train_file, 'r') as f:
+            for line in f:
+                items = list(map(int, line.strip().split()))
+                if len(items) >= 2:
+                    user_id = items[0]
+                    item_ids = items[1:]
+                    self.train_data.append((user_id, item_ids))
+        
+        # 加载草药配伍数据
+        herb_pair_file = os.path.join(self.data_path, 'herbPair-40.txt')
+        self.herb_pairs = []
+        if os.path.exists(herb_pair_file):
+            with open(herb_pair_file, 'r') as f:
+                for line in f:
+                    items = list(map(int, line.strip().split()))
+                    if len(items) == 2:
+                        self.herb_pairs.append(tuple(items))
+        
+        # 加载症状配伍数据
+        sym_pair_file = os.path.join(self.data_path, 'symPair-5.txt')
+        self.sym_pairs = []
+        if os.path.exists(sym_pair_file):
+            with open(sym_pair_file, 'r') as f:
+                for line in f:
+                    items = list(map(int, line.strip().split()))
+                    if len(items) == 2:
+                        self.sym_pairs.append(tuple(items))
+    
+    def build_hypergraph_from_train_data(self):
+        """从训练数据构建超图"""
+        import torch
+        import numpy as np
+        from collections import defaultdict
+        
+        # 创建超边
+        hyperedges = []
+        
+        # 基于用户-物品交互创建超边
+        for user_id, item_ids in self.train_data:
+            if len(item_ids) > 1:
+                hyperedges.append(item_ids)
+        
+        # 基于草药配伍关系创建超边
+        herb_groups = defaultdict(set)
+        for herb1, herb2 in self.herb_pairs:
+            herb_groups[herb1].add(herb2)
+            herb_groups[herb2].add(herb1)
+        
+        for herb, related_herbs in herb_groups.items():
+            if len(related_herbs) > 0:
+                hyperedge = [herb] + list(related_herbs)
+                hyperedges.append(hyperedge)
+        
+        # 构建关联矩阵 H (节点 x 超边)
+        num_nodes = self.n_items
+        num_hyperedges = len(hyperedges)
+        
+        if num_hyperedges == 0:
+            # 如果没有超边，创建一个简单的超图
+            self.hypergraph_adj = torch.eye(num_nodes).to(self.device)
+            return
+        
+        H = np.zeros((num_nodes, num_hyperedges))
+        for i, hyperedge in enumerate(hyperedges):
+            for node in hyperedge:
+                if node < num_nodes:
+                    H[node, i] = 1
+        
+        # 计算超图拉普拉斯矩阵
+        self.hypergraph_adj = self._compute_hypergraph_laplacian(H)
+    
+    def _compute_hypergraph_laplacian(self, H):
+        """计算超图拉普拉斯矩阵"""
+        import torch
+        import numpy as np
+        
+        # 计算节点度矩阵 D_v
+        d_v = np.sum(H, axis=1)
+        d_v = np.where(d_v == 0, 1, d_v)  # 避免除零
+        D_v_inv_sqrt = np.diag(1.0 / np.sqrt(d_v))
+        
+        # 计算超边度矩阵 D_e
+        d_e = np.sum(H, axis=0)
+        d_e = np.where(d_e == 0, 1, d_e)  # 避免除零
+        D_e_inv = np.diag(1.0 / d_e)
+        
+        # 计算归一化拉普拉斯矩阵: L = D_v^(-1/2) * H * D_e^(-1) * H^T * D_v^(-1/2)
+        L = D_v_inv_sqrt @ H @ D_e_inv @ H.T @ D_v_inv_sqrt
+        
+        # 转换为稀疏张量
+        L_sparse = torch.sparse_coo_tensor(
+            indices=torch.from_numpy(np.array(np.nonzero(L))).long(),
+            values=torch.from_numpy(L[np.nonzero(L)]).float(),
+            size=L.shape
+        ).to(self.device)
+        
+        return L_sparse
+    
+    def create_hypergraph_views(self, embeddings):
+        """创建超图的不同视图用于对比学习"""
+        import torch
+        import torch.nn.functional as F
+        
+        # 原始视图
+        view1 = torch.sparse.mm(self.hypergraph_adj, embeddings)
+        
+        # 添加噪声的视图
+        noise = torch.randn_like(embeddings) * 0.1
+        view2 = torch.sparse.mm(self.hypergraph_adj, embeddings + noise)
+        
+        # Dropout视图
+        dropout_adj = F.dropout(self.hypergraph_adj.coalesce().values(), p=0.1, training=self.training)
+        dropout_indices = self.hypergraph_adj.coalesce().indices()
+        dropout_hypergraph = torch.sparse_coo_tensor(
+            dropout_indices, dropout_adj, self.hypergraph_adj.shape
+        ).to(self.device)
+        view3 = torch.sparse.mm(dropout_hypergraph, embeddings)
+        
+        return view1, view2, view3
+    
+    def compute_contrastive_loss(self, view1, view2, temperature=0.1):
+        """计算对比学习损失"""
+        import torch
+        import torch.nn.functional as F
+        
+        # 归一化
+        view1 = F.normalize(view1, dim=1)
+        view2 = F.normalize(view2, dim=1)
+        
+        # 计算相似度矩阵
+        similarity_matrix = torch.mm(view1, view2.t()) / temperature
+        
+        # 创建标签（对角线为正样本）
+        batch_size = view1.size(0)
+        labels = torch.arange(batch_size).to(view1.device)
+        
+        # 计算对比损失
+        loss = F.cross_entropy(similarity_matrix, labels)
+        
+        return loss
 
 
     # 初始化权重，存在all weight字典中，键为权重的名字，值为权重的值
@@ -138,8 +300,9 @@ class SMGCN(nn.Module):
             # all_weights['Q_user_%d' % k] = nn.Parameter(initializer(Q_user))
             # all_weights['Q_item_%d' % k] = nn.Parameter(initializer(Q_item))
 
-        self.mlp_predict_weight_size_list = [self.mlp_predict_weight_size[
-                                                 len(self.mlp_predict_weight_size) - 1]] + self.mlp_predict_weight_size
+        # 修正MLP层的输入和输出维度，应该与embedding维度匹配
+        # 输入维度是emb_dim，输出维度也应该是emb_dim以便与ia_embeddings匹配
+        self.mlp_predict_weight_size_list = [self.emb_dim] + self.mlp_predict_weight_size + [self.emb_dim]
         print('mlp_predict_weight_size_list ', self.mlp_predict_weight_size_list)
         for k in range(self.mlp_predict_n_layers):
             W_predict_mlp_user = torch.empty([self.mlp_predict_weight_size_list[k], self.mlp_predict_weight_size_list[k + 1]])
@@ -245,13 +408,24 @@ class SMGCN(nn.Module):
                                              self.weights['item_embedding'])
         item_pair_embeddings = torch.tanh(torch.matmul(temp, self.weights['M_item']))
 
+        # 超图增强
+        hypergraph_embeddings = None
+        if self.use_hypergraph and self.hypergraph_adj is not None:
+            # 使用超图拉普拉斯矩阵增强物品嵌入
+            hypergraph_embeddings = torch.sparse.mm(self.hypergraph_adj, i_g_embeddings)
+            hypergraph_embeddings = F.normalize(hypergraph_embeddings, p=2, dim=1)
+
         if self.fusion in ['add']:
             i_g_embeddings = i_g_embeddings + item_pair_embeddings
+            if hypergraph_embeddings is not None:
+                i_g_embeddings = i_g_embeddings + hypergraph_embeddings
 
         if self.fusion in ['concat']:
             i_g_embeddings = torch.cat([i_g_embeddings, item_pair_embeddings], 1)
+            if hypergraph_embeddings is not None:
+                i_g_embeddings = torch.cat([i_g_embeddings, hypergraph_embeddings], 1)
 
-        return i_g_embeddings, item_pair_embeddings
+        return i_g_embeddings, item_pair_embeddings, hypergraph_embeddings
 
     def create_batch_rating(self, pos_items, user_embeddings):
         # sum_embeddings = torch.matmul(users, ua_embeddings)
@@ -321,30 +495,6 @@ class SMGCN(nn.Module):
 
         return mf_loss, emb_loss, reg_loss, cl_loss
 
-    def compute_contrastive_loss(self, view1, view2):
-        """
-        计算对比学习损失
-        Args:
-            view1: 第一个视图的嵌入
-            view2: 第二个视图的嵌入
-        Returns:
-            contrastive_loss: 对比学习损失
-        """
-        # 归一化嵌入
-        view1 = F.normalize(view1, dim=1)
-        view2 = F.normalize(view2, dim=1)
-        
-        # 计算相似度矩阵
-        similarity = torch.matmul(view1, view2.t()) / self.temperature
-        
-        # 正样本对的标签
-        labels = torch.arange(similarity.size(0)).to(self.device)
-        
-        # 计算对比损失
-        loss = F.cross_entropy(similarity, labels)
-        
-        return loss
-
     def forward(self, users, user_set=None, pos_items=None, train=True):
         """
           *********************************************************
@@ -357,9 +507,9 @@ class SMGCN(nn.Module):
         # todo: todo 应该在主函数中
         if self.alg_type in ['SMGCN']:
             if train:
-                # 获取用户和物品的两个视图嵌入
+                # 获取用户和物品的嵌入
                 u_g_embeddings, user_pair_embeddings = self._create_graphsage_user_embed()
-                i_g_embeddings, item_pair_embeddings = self._create_graphsage_item_embed()
+                i_g_embeddings, item_pair_embeddings, hypergraph_embeddings = self._create_graphsage_item_embed()
 
                 # 计算用户嵌入
                 sum_embeddings = torch.matmul(users, u_g_embeddings)
@@ -382,11 +532,20 @@ class SMGCN(nn.Module):
                 cl_loss_user = self.compute_contrastive_loss(u_g_embeddings, user_pair_embeddings)
                 cl_loss_item = self.compute_contrastive_loss(i_g_embeddings, item_pair_embeddings)
                 
-                return user_embeddings, all_user_embeddins, i_g_embeddings, cl_loss_user, cl_loss_item
+                # 超图对比学习损失
+                cl_loss_hypergraph = 0
+                if self.use_hypergraph and hypergraph_embeddings is not None:
+                    # 创建超图的多个视图进行对比学习
+                    view1, view2, view3 = self.create_hypergraph_views(i_g_embeddings)
+                    cl_loss_hypergraph = self.compute_contrastive_loss(view1, view2) + \
+                                       self.compute_contrastive_loss(view1, view3)
+                    cl_loss_hypergraph *= self.contrastive_weight
+                
+                return user_embeddings, all_user_embeddins, i_g_embeddings, cl_loss_user, cl_loss_item, cl_loss_hypergraph
             else:
                 # 测试阶段不需要计算对比损失
                 u_g_embeddings, _ = self._create_graphsage_user_embed()
-                i_g_embeddings, _ = self._create_graphsage_item_embed()
+                i_g_embeddings, _, _ = self._create_graphsage_item_embed()
                 pos_items = torch.tensor(pos_items, dtype=torch.long).to(args.device)
                 pos_i_g_embeddings = torch.index_select(i_g_embeddings, 0, pos_items)
                 
