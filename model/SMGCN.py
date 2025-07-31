@@ -16,7 +16,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 
-
 class SMGCN(nn.Module):
     def __init__(self, data_config, pretrain_data):
         super(SMGCN, self).__init__()
@@ -27,6 +26,7 @@ class SMGCN(nn.Module):
         self.pretrain_data = pretrain_data
         self.n_users = data_config['n_users']
         self.n_items = data_config['n_items']
+        self.data_path = args.data_path + args.dataset
 
         self.n_fold = 100
         self.norm_adj = data_config['norm_adj']
@@ -36,7 +36,6 @@ class SMGCN(nn.Module):
         self.lr = args.lr
         # self.link_lr = args.link_lr
         self.emb_dim = args.embed_size
-        print("emb_dim: ", self.emb_dim)
         self.batch_size = args.batch_size
         self.loss_weight = args.loss_weight
 
@@ -46,17 +45,17 @@ class SMGCN(nn.Module):
 
         # 添加对比学习相关参数
         self.temperature = 0.07  # 对比学习温度参数
-        self.cl_weight = 0.1    # 对比学习损失权重
+        self.cl_weight = args.cl_weight  # 对比学习损失权重，使用命令行参数
 
         self.fusion = args.fusion
         print('***********fusion method************ ', self.fusion)
 
         self.mlp_predict_weight_size = eval(args.mlp_layer_size)
-        self.mlp_predict_n_layers = len(self.mlp_predict_weight_size)
+        # 添加一个输出层，所以层数需要加1
+        self.mlp_predict_n_layers = len(self.mlp_predict_weight_size) + 1
         print('mlp predict weight ', self.mlp_predict_weight_size)
         print('mlp_predict layer ', self.mlp_predict_n_layers)
-        self.model_type += '_%s_%s_l%d' % (self.adj_type,
-                                           self.alg_type, self.n_layers)
+        self.model_type += '_%s_%s_l%d' % (self.adj_type, self.alg_type, self.n_layers)
 
         self.regs = eval(args.regs)
         print('regs ', self.regs)
@@ -81,6 +80,7 @@ class SMGCN(nn.Module):
 
         # self.item_weights = tf.placeholder(tf.float32, shape=(self.n_items, 1))
 
+
         """
         *********************************************************
         Create Model Parameters (i.e., Initialize Weights)
@@ -99,24 +99,175 @@ class SMGCN(nn.Module):
         Compute link prediction loss
         """
         # self._build_loss_phase_II()
+        
+        # 超图相关属性
+        self.hypergraph_adj = None
+        self.use_hypergraph = False
+        self.hypergraph_embed_size = self.emb_dim
+        self.contrastive_weight = 0.1
+        
+        # 加载草药训练数据并构建超图
+        if hasattr(args, 'use_hypergraph') and args.use_hypergraph:
+            self.use_hypergraph = True
+            self.load_herb_train_data()
+            self.build_hypergraph_from_train_data()
+    
+    def load_herb_train_data(self):
+        """加载草药训练数据"""
+        import os
+        
+        # 加载训练数据
+        train_file = os.path.join(self.data_path, 'train.txt')
+        self.train_data = []
+        with open(train_file, 'r') as f:
+            for line in f:
+                items = list(map(int, line.strip().split()))
+                if len(items) >= 2:
+                    user_id = items[0]
+                    item_ids = items[1:]
+                    self.train_data.append((user_id, item_ids))
+        
+        # 加载草药配伍数据
+        herb_pair_file = os.path.join(self.data_path, 'herbPair-40.txt')
+        self.herb_pairs = []
+        if os.path.exists(herb_pair_file):
+            with open(herb_pair_file, 'r') as f:
+                for line in f:
+                    items = list(map(int, line.strip().split()))
+                    if len(items) == 2:
+                        self.herb_pairs.append(tuple(items))
+        
+        # 加载症状配伍数据
+        sym_pair_file = os.path.join(self.data_path, 'symPair-5.txt')
+        self.sym_pairs = []
+        if os.path.exists(sym_pair_file):
+            with open(sym_pair_file, 'r') as f:
+                for line in f:
+                    items = list(map(int, line.strip().split()))
+                    if len(items) == 2:
+                        self.sym_pairs.append(tuple(items))
+    
+    def build_hypergraph_from_train_data(self):
+        """从训练数据构建超图"""
+        import torch
+        import numpy as np
+        from collections import defaultdict
+        
+        # 创建超边
+        hyperedges = []
+        
+        # 基于用户-物品交互创建超边
+        for user_id, item_ids in self.train_data:
+            if len(item_ids) > 1:
+                hyperedges.append(item_ids)
+        
+        # 基于草药配伍关系创建超边
+        herb_groups = defaultdict(set)
+        for herb1, herb2 in self.herb_pairs:
+            herb_groups[herb1].add(herb2)
+            herb_groups[herb2].add(herb1)
+        
+        for herb, related_herbs in herb_groups.items():
+            if len(related_herbs) > 0:
+                hyperedge = [herb] + list(related_herbs)
+                hyperedges.append(hyperedge)
+        
+        # 构建关联矩阵 H (节点 x 超边)
+        num_nodes = self.n_items
+        num_hyperedges = len(hyperedges)
+        
+        if num_hyperedges == 0:
+            # 如果没有超边，创建一个简单的超图
+            self.hypergraph_adj = torch.eye(num_nodes).to(self.device)
+            return
+        
+        H = np.zeros((num_nodes, num_hyperedges))
+        for i, hyperedge in enumerate(hyperedges):
+            for node in hyperedge:
+                if node < num_nodes:
+                    H[node, i] = 1
+        
+        # 计算超图拉普拉斯矩阵
+        self.hypergraph_adj = self._compute_hypergraph_laplacian(H)
+    
+    def _compute_hypergraph_laplacian(self, H):
+        """计算超图拉普拉斯矩阵"""
+        import torch
+        import numpy as np
+        
+        # 计算节点度矩阵 D_v
+        d_v = np.sum(H, axis=1)
+        d_v = np.where(d_v == 0, 1, d_v)  # 避免除零
+        D_v_inv_sqrt = np.diag(1.0 / np.sqrt(d_v))
+        
+        # 计算超边度矩阵 D_e
+        d_e = np.sum(H, axis=0)
+        d_e = np.where(d_e == 0, 1, d_e)  # 避免除零
+        D_e_inv = np.diag(1.0 / d_e)
+        
+        # 计算归一化拉普拉斯矩阵: L = D_v^(-1/2) * H * D_e^(-1) * H^T * D_v^(-1/2)
+        L = D_v_inv_sqrt @ H @ D_e_inv @ H.T @ D_v_inv_sqrt
+        
+        # 转换为稀疏张量
+        L_sparse = torch.sparse_coo_tensor(
+            indices=torch.from_numpy(np.array(np.nonzero(L))).long(),
+            values=torch.from_numpy(L[np.nonzero(L)]).float(),
+            size=L.shape
+        ).to(self.device)
+        
+        return L_sparse
+    
+    def create_hypergraph_views(self, embeddings):
+        """创建超图的不同视图用于对比学习"""
+        import torch
+        import torch.nn.functional as F
+        
+        # 原始视图
+        view1 = torch.sparse.mm(self.hypergraph_adj, embeddings)
+        
+        # 添加噪声的视图
+        noise = torch.randn_like(embeddings) * 0.1
+        view2 = torch.sparse.mm(self.hypergraph_adj, embeddings + noise)
+        
+        # Dropout视图
+        dropout_adj = F.dropout(self.hypergraph_adj.coalesce().values(), p=0.1, training=self.training)
+        dropout_indices = self.hypergraph_adj.coalesce().indices()
+        dropout_hypergraph = torch.sparse_coo_tensor(
+            dropout_indices, dropout_adj, self.hypergraph_adj.shape
+        ).to(self.device)
+        view3 = torch.sparse.mm(dropout_hypergraph, embeddings)
+        
+        return view1, view2, view3
+    
+    def compute_contrastive_loss(self, view1, view2, temperature=0.1):
+        """计算对比学习损失"""
+        import torch
+        import torch.nn.functional as F
+        
+        # 归一化
+        view1 = F.normalize(view1, dim=1)
+        view2 = F.normalize(view2, dim=1)
+        
+        # 计算相似度矩阵
+        similarity_matrix = torch.mm(view1, view2.t()) / temperature
+        
+        # 创建标签（对角线为正样本）
+        batch_size = view1.size(0)
+        labels = torch.arange(batch_size).to(view1.device)
+        
+        # 计算对比损失
+        loss = F.cross_entropy(similarity_matrix, labels)
+        
+        return loss
 
-        # 加载超图嵌入
-        self.hypergraph_emb = torch.tensor(np.load(
-            "data/Herb/hypergraph_node_embeddings.npy"), dtype=torch.float32).to(self.device)
-        # 动态初始化融合MLP
-        self.fusion_mlp_user = None
-        self.fusion_mlp_item = None
 
     # 初始化权重，存在all weight字典中，键为权重的名字，值为权重的值
-
     def _init_weights(self):
         # xavier init
         initializer = nn.init.xavier_uniform_
         all_weights = nn.ParameterDict()
-        all_weights.update({'user_embedding': nn.Parameter(
-            initializer(torch.empty(self.n_users, self.emb_dim)))})
-        all_weights.update({'item_embedding': nn.Parameter(
-            initializer(torch.empty(self.n_items, self.emb_dim)))})
+        all_weights.update({'user_embedding': nn.Parameter(initializer(torch.empty(self.n_users, self.emb_dim)))})
+        all_weights.update({'item_embedding': nn.Parameter(initializer(torch.empty(self.n_items, self.emb_dim)))})
         # all_weights['user_embedding'] = nn.Parameter(initializer(torch.empty(self.n_users, self.emb_dim)))
         # all_weights['item_embedding'] = nn.Parameter(initializer(torch.empty(self.n_items, self.emb_dim)))
         if self.pretrain_data is None:
@@ -127,32 +278,21 @@ class SMGCN(nn.Module):
             all_weights['item_embedding'].data = self.pretrain_data['item_embed']
             print('using pretrained initialization')
 
-        # [embedding size, layer_size]
-        self.weight_size_list = [self.emb_dim] + self.weight_size
+        self.weight_size_list = [self.emb_dim] + self.weight_size    # [embedding size, layer_size]
         pair_dimension = self.weight_size_list[len(self.weight_size_list) - 1]
         for k in range(self.n_layers):
-            w_gc_user = torch.empty(
-                [2 * self.weight_size_list[k], self.weight_size_list[k + 1]])
+            w_gc_user = torch.empty([2 * self.weight_size_list[k], self.weight_size_list[k + 1]])
             b_gc_user = torch.empty([1, self.weight_size_list[k + 1]])
-            W_gc_item = torch.empty(
-                [2 * self.weight_size_list[k], self.weight_size_list[k + 1]])
+            W_gc_item = torch.empty([2 * self.weight_size_list[k], self.weight_size_list[k + 1]])
             b_gc_item = torch.empty([1, self.weight_size_list[k + 1]])
-            Q_user = torch.empty(
-                [self.weight_size_list[k], self.weight_size_list[k]])
-            Q_item = torch.empty(
-                [self.weight_size_list[k], self.weight_size_list[k]])
-            all_weights.update(
-                {'W_gc_user_%d' % k: nn.Parameter(initializer(w_gc_user))})
-            all_weights.update(
-                {'b_gc_user_%d' % k: nn.Parameter(initializer(b_gc_user))})
-            all_weights.update(
-                {'W_gc_item_%d' % k: nn.Parameter(initializer(W_gc_item))})
-            all_weights.update(
-                {'b_gc_item_%d' % k: nn.Parameter(initializer(b_gc_item))})
-            all_weights.update(
-                {'Q_user_%d' % k: nn.Parameter(initializer(Q_user))})
-            all_weights.update(
-                {'Q_item_%d' % k: nn.Parameter(initializer(Q_item))})
+            Q_user = torch.empty([self.weight_size_list[k], self.weight_size_list[k]])
+            Q_item = torch.empty([self.weight_size_list[k], self.weight_size_list[k]])
+            all_weights.update({'W_gc_user_%d' % k: nn.Parameter(initializer(w_gc_user))})
+            all_weights.update({'b_gc_user_%d' % k: nn.Parameter(initializer(b_gc_user))})
+            all_weights.update({'W_gc_item_%d' % k: nn.Parameter(initializer(W_gc_item))})
+            all_weights.update({'b_gc_item_%d' % k: nn.Parameter(initializer(b_gc_item))})
+            all_weights.update({'Q_user_%d' % k: nn.Parameter(initializer(Q_user))})
+            all_weights.update({'Q_item_%d' % k: nn.Parameter(initializer(Q_item))})
             # all_weights['W_gc_user_%d' % k] = nn.Parameter(initializer(w_gc_user))
             # all_weights['b_gc_user_%d' % k] = nn.Parameter(initializer(b_gc_user))
             # all_weights['W_gc_item_%d' % k] = nn.Parameter(initializer(W_gc_item))
@@ -160,19 +300,15 @@ class SMGCN(nn.Module):
             # all_weights['Q_user_%d' % k] = nn.Parameter(initializer(Q_user))
             # all_weights['Q_item_%d' % k] = nn.Parameter(initializer(Q_item))
 
-        self.mlp_predict_weight_size_list = [self.mlp_predict_weight_size[
-            len(self.mlp_predict_weight_size) - 1]] + self.mlp_predict_weight_size
-        print('mlp_predict_weight_size_list ',
-              self.mlp_predict_weight_size_list)
+        # 修正MLP层的输入和输出维度，应该与embedding维度匹配
+        # 输入维度是emb_dim，输出维度也应该是emb_dim以便与ia_embeddings匹配
+        self.mlp_predict_weight_size_list = [self.emb_dim] + self.mlp_predict_weight_size + [self.emb_dim]
+        print('mlp_predict_weight_size_list ', self.mlp_predict_weight_size_list)
         for k in range(self.mlp_predict_n_layers):
-            W_predict_mlp_user = torch.empty(
-                [self.mlp_predict_weight_size_list[k], self.mlp_predict_weight_size_list[k + 1]])
-            b_predict_mlp_user = torch.empty(
-                [1, self.mlp_predict_weight_size_list[k + 1]])
-            all_weights.update({'W_predict_mlp_user_%d' %
-                               k: nn.Parameter(initializer(W_predict_mlp_user))})
-            all_weights.update({'b_predict_mlp_user_%d' %
-                               k: nn.Parameter(initializer(b_predict_mlp_user))})
+            W_predict_mlp_user = torch.empty([self.mlp_predict_weight_size_list[k], self.mlp_predict_weight_size_list[k + 1]])
+            b_predict_mlp_user = torch.empty([1, self.mlp_predict_weight_size_list[k + 1]])
+            all_weights.update({'W_predict_mlp_user_%d' % k: nn.Parameter(initializer(W_predict_mlp_user))})
+            all_weights.update({'b_predict_mlp_user_%d' % k: nn.Parameter(initializer(b_predict_mlp_user))})
             # all_weights['W_predict_mlp_user_%d' % k] = nn.Parameter(initializer(W_predict_mlp_user))
             # all_weights['b_predict_mlp_user_%d' % k] = nn.Parameter(initializer(b_predict_mlp_user))
         print("\n", "#" * 75, "pair_dimension is ", pair_dimension)
@@ -203,26 +339,22 @@ class SMGCN(nn.Module):
                 end = self.n_users + self.n_items
             else:
                 end = (i_fold + 1) * fold_len
-            A_fold_hat.append(self._convert_sp_mat_to_sp_tensor(
-                X[start:end]).to(self.device))
+            A_fold_hat.append(self._convert_sp_mat_to_sp_tensor(X[start:end]).to(self.device))
         return A_fold_hat
 
     # 使用图卷积神经网络得到的user embedding
     def _create_graphsage_user_embed(self):
         A_fold_hat = self._split_A_hat(self.norm_adj)    # list
-        pre_embeddings = torch.cat(
-            [self.weights['user_embedding'], self.weights['item_embedding']], 0)
+        pre_embeddings = torch.cat([self.weights['user_embedding'], self.weights['item_embedding']], 0)
 
         # print("*" * 20, "embeddings", pre_embeddings)
         all_embeddings = [pre_embeddings]
         for k in range(self.n_layers):
             temp_embed = []
             for f in range(self.n_fold):
-                temp_embed.append(torch.sparse.mm(
-                    A_fold_hat[f], pre_embeddings))
+                temp_embed.append(torch.sparse.mm(A_fold_hat[f], pre_embeddings))
             embeddings = torch.cat(temp_embed, 0)
-            embeddings = torch.tanh(torch.matmul(
-                embeddings, self.weights['Q_user_%d' % k]))
+            embeddings = torch.tanh(torch.matmul(embeddings, self.weights['Q_user_%d' % k]))
             embeddings = torch.cat([pre_embeddings, embeddings], 1)
 
             pre_embeddings = torch.tanh(
@@ -233,38 +365,32 @@ class SMGCN(nn.Module):
             all_embeddings = [norm_embeddings]
 
         all_embeddings = torch.cat(all_embeddings, 1)
-        u_g_embeddings, i_g_embeddings = torch.split(
-            all_embeddings, [self.n_users, self.n_items], 0)
+        u_g_embeddings, i_g_embeddings = torch.split(all_embeddings, [self.n_users, self.n_items], 0)
 
         temp = torch.sparse.mm(self._convert_sp_mat_to_sp_tensor(self.sym_pair_adj).to(self.device),
-                               self.weights['user_embedding'])
-        user_pair_embeddings = torch.tanh(
-            torch.matmul(temp, self.weights['M_user']))
+                                             self.weights['user_embedding'])
+        user_pair_embeddings = torch.tanh(torch.matmul(temp, self.weights['M_user']))
 
         if self.fusion in ['add']:
             u_g_embeddings = u_g_embeddings + user_pair_embeddings
         if self.fusion in ['concat']:
-            u_g_embeddings = torch.cat(
-                [u_g_embeddings, user_pair_embeddings], 1)
+            u_g_embeddings = torch.cat([u_g_embeddings, user_pair_embeddings], 1)
         return u_g_embeddings, user_pair_embeddings
 
     def _create_graphsage_item_embed(self):
         A_fold_hat = self._split_A_hat(self.norm_adj)
 
-        pre_embeddings = torch.cat(
-            [self.weights['user_embedding'], self.weights['item_embedding']], 0)
+        pre_embeddings = torch.cat([self.weights['user_embedding'], self.weights['item_embedding']], 0)
 
         all_embeddings = [pre_embeddings]
         for k in range(self.n_layers):
 
             temp_embed = []
             for f in range(self.n_fold):
-                temp_embed.append(torch.sparse.mm(
-                    A_fold_hat[f], pre_embeddings))
+                temp_embed.append(torch.sparse.mm(A_fold_hat[f], pre_embeddings))
             embeddings = torch.cat(temp_embed, 0)
 
-            embeddings = torch.tanh(torch.matmul(
-                embeddings, self.weights['Q_item_%d' % k]))
+            embeddings = torch.tanh(torch.matmul(embeddings, self.weights['Q_item_%d' % k]))
             embeddings = torch.cat([pre_embeddings, embeddings], 1)
 
             pre_embeddings = torch.tanh(
@@ -276,22 +402,30 @@ class SMGCN(nn.Module):
             all_embeddings = [norm_embeddings]
 
         all_embeddings = torch.cat(all_embeddings, 1)
-        u_g_embeddings, i_g_embeddings = torch.split(
-            all_embeddings, [self.n_users, self.n_items], 0)
+        u_g_embeddings, i_g_embeddings = torch.split(all_embeddings, [self.n_users, self.n_items], 0)
 
         temp = torch.sparse.mm(self._convert_sp_mat_to_sp_tensor(self.herb_pair_adj).to(self.device),
-                               self.weights['item_embedding'])
-        item_pair_embeddings = torch.tanh(
-            torch.matmul(temp, self.weights['M_item']))
+                                             self.weights['item_embedding'])
+        item_pair_embeddings = torch.tanh(torch.matmul(temp, self.weights['M_item']))
+
+        # 超图增强
+        hypergraph_embeddings = None
+        if self.use_hypergraph and self.hypergraph_adj is not None:
+            # 使用超图拉普拉斯矩阵增强物品嵌入
+            hypergraph_embeddings = torch.sparse.mm(self.hypergraph_adj, i_g_embeddings)
+            hypergraph_embeddings = F.normalize(hypergraph_embeddings, p=2, dim=1)
 
         if self.fusion in ['add']:
             i_g_embeddings = i_g_embeddings + item_pair_embeddings
+            if hypergraph_embeddings is not None:
+                i_g_embeddings = i_g_embeddings + hypergraph_embeddings
 
         if self.fusion in ['concat']:
-            i_g_embeddings = torch.cat(
-                [i_g_embeddings, item_pair_embeddings], 1)
+            i_g_embeddings = torch.cat([i_g_embeddings, item_pair_embeddings], 1)
+            if hypergraph_embeddings is not None:
+                i_g_embeddings = torch.cat([i_g_embeddings, hypergraph_embeddings], 1)
 
-        return i_g_embeddings, item_pair_embeddings
+        return i_g_embeddings, item_pair_embeddings, hypergraph_embeddings
 
     def create_batch_rating(self, pos_items, user_embeddings):
         # sum_embeddings = torch.matmul(users, ua_embeddings)
@@ -310,8 +444,7 @@ class SMGCN(nn.Module):
         #                      self.weights['W_predict_mlp_user_%d' % k]) + self.weights['b_predict_mlp_user_%d' % k])
         #     user_embeddings = F.dropout(user_embeddings, 1 - self.mess_dropout[k])
 
-        pos_scores = torch.sigmoid(torch.matmul(
-            user_embeddings, pos_items.transpose(0, 1)))
+        pos_scores = torch.sigmoid(torch.matmul(user_embeddings, pos_items.transpose(0, 1)))
         return pos_scores
 
     def create_set2set_loss(self, items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user=None, cl_loss_item=None):
@@ -333,21 +466,18 @@ class SMGCN(nn.Module):
         #         + self.weights['b_predict_mlp_user_%d' % k])
         #
         #     user_embeddings = F.dropout(user_embeddings, 1 - self.mess_dropout[k])
-        # print("*" * 20, "user_embeddings", user_embeddings)
+            # print("*" * 20, "user_embeddings", user_embeddings)
         # print("*" * 20, "user_embeddings", torch.unique(user_embeddings))
 
-        predict_probs = torch.sigmoid(torch.matmul(
-            user_embeddings, ia_embeddings.transpose(0, 1)))
+        predict_probs = torch.sigmoid(torch.matmul(user_embeddings, ia_embeddings.transpose(0, 1)))
         # print("*" * 20, "items", items[0]-predict_probs[0])
         # print(item_weights)
-        mf_loss = torch.sum(torch.matmul(torch.square(
-            (items - predict_probs)), item_weights), 0)
+        mf_loss = torch.sum(torch.matmul(torch.square((items - predict_probs)), item_weights), 0)
         # mf_loss = nn.MSELoss(reduction='elementwise_mean')(items, predict_probs)
         mf_loss = mf_loss / self.batch_size
 
         all_item_embeddins = ia_embeddings
-        regularizer = torch.norm(all_user_embeddins) ** 2 / \
-            2 + torch.norm(all_item_embeddins) ** 2 / 2
+        regularizer = torch.norm(all_user_embeddins) ** 2 / 2 + torch.norm(all_item_embeddins) ** 2 / 2
         regularizer = regularizer.reshape(1)
         # F.normalize(all_user_embeddins, p=2) + F.normalize(all_item_embeddins, p=2)
         regularizer = regularizer / self.batch_size
@@ -359,36 +489,11 @@ class SMGCN(nn.Module):
         if cl_loss_user is not None and cl_loss_item is not None:
             cl_loss = self.cl_weight * (cl_loss_user + cl_loss_item)
 
-        reg_loss = torch.tensor(
-            [0.0], dtype=torch.float64, requires_grad=True).to(self.device)
-        # torch.nn.init.constant(reg_loss, 0.0)
+        reg_loss = torch.tensor([0.0], dtype=torch.float64, requires_grad=True).to(self.device)
+            # torch.nn.init.constant(reg_loss, 0.0)
         # loss = mf_loss + emb_loss + reg_loss
 
         return mf_loss, emb_loss, reg_loss, cl_loss
-
-    def compute_contrastive_loss(self, view1, view2):
-        """
-        计算对比学习损失
-        Args:
-            view1: 第一个视图的嵌入
-            view2: 第二个视图的嵌入
-        Returns:
-            contrastive_loss: 对比学习损失
-        """
-        # 归一化嵌入
-        view1 = F.normalize(view1, dim=1)
-        view2 = F.normalize(view2, dim=1)
-
-        # 计算相似度矩阵
-        similarity = torch.matmul(view1, view2.t()) / self.temperature
-
-        # 正样本对的标签
-        labels = torch.arange(similarity.size(0)).to(self.device)
-
-        # 计算对比损失
-        loss = F.cross_entropy(similarity, labels)
-
-        return loss
 
     def forward(self, users, user_set=None, pos_items=None, train=True):
         """
@@ -402,85 +507,59 @@ class SMGCN(nn.Module):
         # todo: todo 应该在主函数中
         if self.alg_type in ['SMGCN']:
             if train:
-                # 获取用户和物品的两个视图嵌入
+                # 获取用户和物品的嵌入
                 u_g_embeddings, user_pair_embeddings = self._create_graphsage_user_embed()
-                i_g_embeddings, item_pair_embeddings = self._create_graphsage_item_embed()
-
-                # 用户三重融合
-                user_fuse_input = torch.cat(
-                    [u_g_embeddings, user_pair_embeddings], dim=1)
-                if self.fusion_mlp_user is None:
-                    input_dim = user_fuse_input.shape[1]
-                    self.fusion_mlp_user = nn.Sequential(
-                        nn.Linear(input_dim, input_dim),
-                        nn.ReLU(),
-                        nn.Linear(input_dim, self.emb_dim)
-                    ).to(self.device)
-                fused_user_emb = self.fusion_mlp_user(user_fuse_input)
-                hyper_user_emb = self.hypergraph_emb[:self.n_users]
-                cl_loss_user_fusion = self.compute_contrastive_loss(
-                    fused_user_emb, hyper_user_emb)
-
-                # 物品三重融合
-                item_fuse_input = torch.cat(
-                    [i_g_embeddings, item_pair_embeddings], dim=1)
-                if self.fusion_mlp_item is None:
-                    input_dim = item_fuse_input.shape[1]
-                    self.fusion_mlp_item = nn.Sequential(
-                        nn.Linear(input_dim, input_dim),
-                        nn.ReLU(),
-                        nn.Linear(input_dim, self.emb_dim)
-                    ).to(self.device)
-                fused_item_emb = self.fusion_mlp_item(item_fuse_input)
-                hyper_item_emb = self.hypergraph_emb[self.n_users:]
-                cl_loss_item_fusion = self.compute_contrastive_loss(
-                    fused_item_emb, hyper_item_emb)
+                i_g_embeddings, item_pair_embeddings, hypergraph_embeddings = self._create_graphsage_item_embed()
 
                 # 计算用户嵌入
-                sum_embeddings = torch.matmul(users, fused_user_emb)
-                normal_matrix = torch.reciprocal(torch.sum(users, 1))
-                normal_matrix = normal_matrix.unsqueeze(1)
-                extend_normal_embeddings = normal_matrix.repeat(
-                    1, sum_embeddings.shape[1])
-                user_embeddings = torch.mul(
-                    sum_embeddings, extend_normal_embeddings)
-
-                # 获取用户集合的嵌入
-                all_user_embeddins = torch.index_select(
-                    fused_user_emb, 0, user_set)
-
-                # 其余流程保持不变
-                # 删除多余的MLP权重处理
-                # for k in range(0, self.mlp_predict_n_layers):
-                #     user_embeddings = F.relu(
-                #         torch.matmul(user_embeddings, self.weights['W_predict_mlp_user_%d' % k])
-                #         + self.weights['b_predict_mlp_user_%d' % k])
-                #     user_embeddings = F.dropout(user_embeddings, self.mess_dropout[k])
-                return user_embeddings, all_user_embeddins, fused_item_emb, cl_loss_user_fusion, cl_loss_item_fusion
-            else:
-                # 测试阶段不需要计算对比损失
-                u_g_embeddings, _ = self._create_graphsage_user_embed()
-                i_g_embeddings, _ = self._create_graphsage_item_embed()
-                pos_items = torch.tensor(
-                    pos_items, dtype=torch.long).to(args.device)
-                pos_i_g_embeddings = torch.index_select(
-                    i_g_embeddings, 0, pos_items)
-
                 sum_embeddings = torch.matmul(users, u_g_embeddings)
                 normal_matrix = torch.reciprocal(torch.sum(users, 1))
                 normal_matrix = normal_matrix.unsqueeze(1)
-                extend_normal_embeddings = normal_matrix.repeat(
-                    1, sum_embeddings.shape[1])
-                user_embeddings = torch.mul(
-                    sum_embeddings, extend_normal_embeddings)
-
+                extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
+                user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)
+                
+                # 获取用户集合的嵌入
+                all_user_embeddins = torch.index_select(u_g_embeddings, 0, user_set)
+                
+                # MLP层处理
                 for k in range(0, self.mlp_predict_n_layers):
                     user_embeddings = F.relu(
-                        torch.matmul(user_embeddings,
-                                     self.weights['W_predict_mlp_user_%d' % k])
+                        torch.matmul(user_embeddings, self.weights['W_predict_mlp_user_%d' % k])
                         + self.weights['b_predict_mlp_user_%d' % k])
-                    user_embeddings = F.dropout(
-                        user_embeddings, self.mess_dropout[k])
+                    user_embeddings = F.dropout(user_embeddings, self.mess_dropout[k])
+
+                # 计算对比学习损失
+                cl_loss_user = self.compute_contrastive_loss(u_g_embeddings, user_pair_embeddings)
+                cl_loss_item = self.compute_contrastive_loss(i_g_embeddings, item_pair_embeddings)
+                
+                # 超图对比学习损失
+                cl_loss_hypergraph = 0
+                if self.use_hypergraph and hypergraph_embeddings is not None:
+                    # 创建超图的多个视图进行对比学习
+                    view1, view2, view3 = self.create_hypergraph_views(i_g_embeddings)
+                    cl_loss_hypergraph = self.compute_contrastive_loss(view1, view2) + \
+                                       self.compute_contrastive_loss(view1, view3)
+                    cl_loss_hypergraph *= self.contrastive_weight
+                
+                return user_embeddings, all_user_embeddins, i_g_embeddings, cl_loss_user, cl_loss_item, cl_loss_hypergraph
+            else:
+                # 测试阶段不需要计算对比损失
+                u_g_embeddings, _ = self._create_graphsage_user_embed()
+                i_g_embeddings, _, _ = self._create_graphsage_item_embed()
+                pos_items = torch.tensor(pos_items, dtype=torch.long).to(args.device)
+                pos_i_g_embeddings = torch.index_select(i_g_embeddings, 0, pos_items)
+                
+                sum_embeddings = torch.matmul(users, u_g_embeddings)
+                normal_matrix = torch.reciprocal(torch.sum(users, 1))
+                normal_matrix = normal_matrix.unsqueeze(1)
+                extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
+                user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)
+                
+                for k in range(0, self.mlp_predict_n_layers):
+                    user_embeddings = F.relu(
+                        torch.matmul(user_embeddings, self.weights['W_predict_mlp_user_%d' % k])
+                        + self.weights['b_predict_mlp_user_%d' % k])
+                    user_embeddings = F.dropout(user_embeddings, self.mess_dropout[k])
                 return user_embeddings, pos_i_g_embeddings
             # else:
             #     pos_items = torch.tensor(pos_items, dtype=torch.long).to(args.device)
@@ -488,3 +567,14 @@ class SMGCN(nn.Module):
             #
             #     batch_ratings = self.create_batch_rating(users, self.pos_i_g_embeddings)
             #     return batch_ratings
+
+
+
+
+
+
+
+
+
+
+
