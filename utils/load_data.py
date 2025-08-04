@@ -231,7 +231,8 @@ class Data(object):
                 item_sets[index][int(item)] = 1.
                 item_set.add(int(item))
 
-        return user_sets, list(user_set), item_sets, list(item_set)
+        return user_sets, list(user_set), item_sets, list(item_set) # 返回用户-物品矩阵，用户集合，物品集合
+    
 
     def print_statistics(self):
         print('symtom个数n_users=%d, herb个数n_items=%d' % (self.n_users, self.n_items))

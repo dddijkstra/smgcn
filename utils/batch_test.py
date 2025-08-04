@@ -25,7 +25,7 @@ BATCH_SIZE = args.batch_size
 
 def test(model, users_to_test, test_group_list, drop_flag=False):
     result = {'precision': np.zeros(len(Ks)), 'recall': np.zeros(len(Ks)),
-              'ndcg': np.zeros(len(Ks)), 'rmrr': np.zeros(len(Ks))}
+              'f1': np.zeros(len(Ks)), 'rmrr': np.zeros(len(Ks))}
     # test_users = users_to_test
     test_users = torch.tensor(users_to_test, dtype=torch.float32).to(args.device)
     item_batch = range(ITEM_NUM)
@@ -55,7 +55,7 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
 
     precision_n = np.zeros(len(Ks))
     recall_n = np.zeros(len(Ks))
-    ndcg_n = np.zeros(len(Ks))
+    f1_n = np.zeros(len(Ks))
     rmrr_n = np.zeros(len(Ks))
     topN = Ks
 
@@ -96,9 +96,13 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
                 if v[a_rank] in herb_results:
                     a_refer = herb_results.index(v[a_rank])  # herb 在推荐列表中的位置a_refer
                     mrr_score += 1.0 / (abs(a_refer - a_rank) + 1)
-            precision_n[ii] = precision_n[ii] + float(number / topN[ii])
-            recall_n[ii] = recall_n[ii] + float(number / len(v))
-            ndcg_n[ii] = ndcg_n[ii] + ndcg_at_k(r, topN[ii])
+            precision_score = float(number / topN[ii])
+            recall_score = float(number / len(v))
+            f1_score = f1_at_k(precision_score, recall_score)
+            
+            precision_n[ii] = precision_n[ii] + precision_score
+            recall_n[ii] = recall_n[ii] + recall_score
+            f1_n[ii] = f1_n[ii] + f1_score
             rmrr_n[ii] = rmrr_n[ii] + mrr_score / len(v)
     print('gt_count ', gt_count)
     print('candidate_count ', candidate_count)
@@ -106,7 +110,7 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
     for ii in range(len(topN)):
         result['precision'][ii] = precision_n[ii] / len(test_group_list)
         result['recall'][ii] = recall_n[ii] / len(test_group_list)
-        result['ndcg'][ii] = ndcg_n[ii] / len(test_group_list)
+        result['f1'][ii] = f1_n[ii] / len(test_group_list)
         result['rmrr'][ii] = rmrr_n[ii] / len(test_group_list)
     return result
 
@@ -140,5 +144,18 @@ def ndcg_at_k(r, k, method=1):
     if not dcg_max:
         return 0.
     return dcg_at_k(r, k, method) / dcg_max
+
+
+def f1_at_k(precision, recall):
+    """Calculate F1 score from precision and recall
+    Args:
+        precision: Precision score
+        recall: Recall score
+    Returns:
+        F1 score
+    """
+    if precision + recall == 0:
+        return 0.
+    return 2 * precision * recall / (precision + recall)
 
 

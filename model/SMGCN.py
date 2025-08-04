@@ -18,17 +18,17 @@ from torch.autograd import Variable
 
 class SMGCN(nn.Module):
     def __init__(self, data_config, pretrain_data):
-        super(SMGCN, self).__init__()
-        self.model_type = 'SMGCN'
-        self.adj_type = args.adj_type
-        self.alg_type = args.alg_type
+        super(SMGCN, self).__init__() # 父类初始化，传入SMGCN
+        self.model_type = 'SMGCN' # 设置模型类型
+        self.adj_type = args.adj_type # 超图邻接矩阵类型 {plain, norm*, mean}.
+        self.alg_type = args.alg_type # 图卷积算法类型 {SMGCN, ngcf, gcn, gcmc}
 
-        self.pretrain_data = pretrain_data
-        self.n_users = data_config['n_users']
-        self.n_items = data_config['n_items']
-        self.data_path = args.data_path + args.dataset
+        self.pretrain_data = pretrain_data # 使用训练好的模型（如果存在）
+        self.n_users = data_config['n_users'] # 用户数量
+        self.n_items = data_config['n_items'] # 物品数量
+        self.data_path = args.data_path + args.dataset # 数据集路径 {Herb, NetEase, gowalla, yelp2018, amazon-book}
 
-        self.n_fold = 100
+        self.n_fold = 100 
         self.norm_adj = data_config['norm_adj']
         self.sym_pair_adj = data_config['sym_pair_adj']
         self.herb_pair_adj = data_config['herb_pair_adj']
@@ -331,15 +331,33 @@ class SMGCN(nn.Module):
 
     # todo: debug check function
     def _split_A_hat(self, X):
+        """将邻接矩阵X分割成n_fold份,用于分批计算以节省内存
+        
+        Args:
+            X: 稀疏邻接矩阵
+            
+        Returns:
+            A_fold_hat: 包含n_fold个子矩阵的列表,每个子矩阵是原矩阵的一部分
+        """
         A_fold_hat = []
+        # 计算每份的长度
         fold_len = (self.n_users + self.n_items) // self.n_fold
+        
+        # 按fold_len长度分割矩阵
         for i_fold in range(self.n_fold):
+            # 计算当前份的起始位置
             start = i_fold * fold_len
+            
+            # 最后一份可能会比其他份长
             if i_fold == self.n_fold - 1:
                 end = self.n_users + self.n_items
             else:
                 end = (i_fold + 1) * fold_len
-            A_fold_hat.append(self._convert_sp_mat_to_sp_tensor(X[start:end]).to(self.device))
+                
+            # 将分割后的子矩阵转换为稀疏张量并添加到列表中
+            sub_matrix = self._convert_sp_mat_to_sp_tensor(X[start:end])
+            A_fold_hat.append(sub_matrix.to(self.device))
+            
         return A_fold_hat
 
     # 使用图卷积神经网络得到的user embedding
