@@ -44,7 +44,7 @@ current_date=$(date +"%Y%m%d_%H%M")
 mkdir -p output
 
 # 生成日志文件名
-log_file="output/${branch_name}_${commit_id}_${current_date}_${DATASET}.log"
+log_file="output/tmp/${branch_name}_${commit_id}_${current_date}_${DATASET}.log"
 
 echo "开始执行SMGCN训练脚本" | tee $log_file
 echo "执行时间: $(date)" | tee -a $log_file
