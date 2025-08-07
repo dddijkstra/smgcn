@@ -41,7 +41,7 @@ commit_id=$(git rev-parse --short HEAD)
 current_date=$(date +"%Y%m%d_%H%M")
 
 # 创建output目录（如果不存在）
-mkdir -p output
+mkdir -p output/tmp/
 
 # 生成日志文件名
 log_file="output/tmp/${branch_name}_${commit_id}_${current_date}_${DATASET}.log"

@@ -16,50 +16,63 @@ import torch.optim as optim
 
 
 def load_pretrained_data():
-    pretrain_path = '%spretrain/%s/%s.npz' % (args.proj_path, args.dataset, 'embedding')
+    pretrain_path = "%spretrain/%s/%s.npz" % (args.proj_path, args.dataset, "embedding")
     try:
         pretrain_data = np.load(pretrain_path)
-        print('load the pretrained embeddings.')
+        print("load the pretrained embeddings.")
     except Exception:
         pretrain_data = None
     return pretrain_data
 
 
-if __name__ == '__main__':
-    startTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') # 记录开始时间
-    print('start ', startTime)                                        # 打印开始时间
-    print('************SMGCN*************** ')
-    print('result_index ', args.result_index)                         # 打印结果索引
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
-    args.device = torch.device('cuda:' + str(args.gpu_id))
+if __name__ == "__main__":
+    startTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 记录开始时间
+    print("start ", startTime)  # 打印开始时间
+    print("************SMGCN*************** ")
+    print("result_index ", args.result_index)  # 打印结果索引
+    if torch.cuda.is_available():  # 判断是否有可用的 CUDA GPU
+        os.environ["CUDA_VISIBLE_DEVICES"] = (
+            str(  # 设置可见 GPU 设备（在多 GPU 环境下指定使用哪块）
+                args.gpu_id
+            )
+        )  # 多GPU环境下，指定程序使用某个GPU
+        args.device = torch.device(
+            "cuda:" + str(args.gpu_id)
+        )  # 指定 torch 使用的设备（GPU）
+        print(f"使用CUDA设备: {args.device}")  # 打印使用的 CUDA 设备
+    else:  # 若无可用 CUDA
+        args.device = torch.device("cpu")  # 回退到 CPU 设备
+        print("CUDA不可用，使用CPU设备")  # 打印提示信息
 
     config = dict()
-    config['n_users'] = data_generator.n_users
-    config['n_items'] = data_generator.n_items
+    config["n_users"] = data_generator.n_users
+    config["n_items"] = data_generator.n_items
 
     """
     *********************************************************
     Generate the Laplacian matrix, where each entry defines the decay factor (e.g., p_ui) between two connected nodes.
     """
-    plain_adj, norm_adj, mean_adj, sym_pair_adj, herb_pair_adj = data_generator.get_adj_mat()
+    plain_adj, norm_adj, mean_adj, sym_pair_adj, herb_pair_adj = (
+        data_generator.get_adj_mat()
+    )
     args.node_dropout = eval(args.node_dropout)
     args.mess_dropout = [float(x) for x in eval(args.mess_dropout)]
 
-    if args.adj_type == 'plain':
-        config['norm_adj'] = plain_adj
-        print('use the plain adjacency matrix')
-    elif args.adj_type == 'norm':
-        config['norm_adj'] = norm_adj
-        print('use the normalized adjacency matrix')
-    elif args.adj_type == 'gcmc':
-        config['norm_adj'] = mean_adj
-        print('use the gcmc adjacency matrix')
+    if args.adj_type == "plain":
+        config["norm_adj"] = plain_adj
+        print("use the plain adjacency matrix")
+    elif args.adj_type == "norm":
+        config["norm_adj"] = norm_adj
+        print("use the normalized adjacency matrix")
+    elif args.adj_type == "gcmc":
+        config["norm_adj"] = mean_adj
+        print("use the gcmc adjacency matrix")
     else:
-        config['norm_adj'] = mean_adj + sp.eye(mean_adj.shape[0])
-        print('use the mean adjacency matrix')
+        config["norm_adj"] = mean_adj + sp.eye(mean_adj.shape[0])
+        print("use the mean adjacency matrix")
 
-    config['sym_pair_adj'] = sym_pair_adj
-    config['herb_pair_adj'] = herb_pair_adj
+    config["sym_pair_adj"] = sym_pair_adj
+    config["herb_pair_adj"] = herb_pair_adj
 
     t0 = time()
 
@@ -70,21 +83,23 @@ if __name__ == '__main__':
 
     model = SMGCN(data_config=config, pretrain_data=pretrain_data).to(args.device)
     print(model)
-    
+
     # 超图功能集成测试
     print("\n开始测试超图功能集成...")
     print(f"symtom个数n_users={config['n_users']}, herb个数n_items={config['n_items']}")
-    
+
     # 启用超图功能
     args.use_hypergraph = True
     model.use_hypergraph = True
-    
+
     # 加载草药训练数据并构建超图
     model.load_herb_train_data()
     model.build_hypergraph_from_train_data()
-    
+
     print("✅ 超图功能集成成功！")
-    print(f"超图邻接矩阵形状: {model.hypergraph_adj.shape if model.hypergraph_adj is not None else 'None'}")
+    print(
+        f"超图邻接矩阵形状: {model.hypergraph_adj.shape if model.hypergraph_adj is not None else 'None'}"
+    )
     print(f"超图嵌入维度: {model.hypergraph_embed_size}")
     print(f"对比学习权重: {model.contrastive_weight}")
 
@@ -92,9 +107,13 @@ if __name__ == '__main__':
     *********************************************************
     Save the model parameters.
     """
-    weights_save_path = '%sweights/%s/%s/l%s_r%s' % (
-        args.weights_path, args.dataset, model.model_type, str(args.lr),
-        '-'.join([str(r) for r in eval(args.regs)]))
+    weights_save_path = "%sweights/%s/%s/l%s_r%s" % (
+        args.weights_path,
+        args.dataset,
+        model.model_type,
+        str(args.lr),
+        "-".join([str(r) for r in eval(args.regs)]),
+    )
     ensureDir(weights_save_path)
 
     cur_best_pre_0, stopping_step = 0, 0
@@ -106,13 +125,17 @@ if __name__ == '__main__':
     """
     print("args.pretrain\t", args.pretrain)
     if args.pretrain == 1:
-        layer = '-'.join([str(l) for l in eval(args.layer_size)])
-        mess_dr = '-'.join([str(d) for d in eval(args.mess_dropout)])
-        weights_save_path = '%sweights/%s/%s/l%s_r%s' % (
-            args.weights_path, args.dataset, model.model_type, layer,
-            '-'.join([str(r) for r in eval(args.regs)]))
+        layer = "-".join([str(l) for l in eval(args.layer_size)])
+        mess_dr = "-".join([str(d) for d in eval(args.mess_dropout)])
+        weights_save_path = "%sweights/%s/%s/l%s_r%s" % (
+            args.weights_path,
+            args.dataset,
+            model.model_type,
+            layer,
+            "-".join([str(r) for r in eval(args.regs)]),
+        )
         pretrain_path = weights_save_path
-        print('load the pretrained model parameters from: ', pretrain_path)
+        print("load the pretrained model parameters from: ", pretrain_path)
 
     """
     *********************************************************
@@ -123,7 +146,14 @@ if __name__ == '__main__':
 
     for epoch in range(args.epoch):
         t1 = time()
-        loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total = 0., 0., 0., 0., 0., 0.
+        loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total = (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
 
         n_batch = data_generator.n_train // args.batch_size + 1
 
@@ -133,20 +163,43 @@ if __name__ == '__main__':
             users = torch.tensor(users, dtype=torch.float32).to(args.device)
             user_set = torch.tensor(user_set, dtype=torch.long).to(args.device)
             items = torch.tensor(items, dtype=torch.float32).to(args.device)
-            item_weights = torch.tensor(data_generator.item_weights, dtype=torch.float32).to(args.device)
+            item_weights = torch.tensor(
+                data_generator.item_weights, dtype=torch.float32
+            ).to(args.device)
 
             # 前向传播，获取用户和物品的嵌入以及对比学习损失
-            user_embeddings, all_user_embeddins, ia_embeddings, cl_loss_user, cl_loss_item, cl_loss_hypergraph = model(users, user_set)
-            
+            (
+                user_embeddings,
+                all_user_embeddins,
+                ia_embeddings,
+                cl_loss_user,
+                cl_loss_item,
+                cl_loss_hypergraph,
+            ) = model(users, user_set)
+
             # 超图对比学习损失已经在forward方法中计算
-            
+
             # 计算损失
-            batch_mf_loss, batch_emb_loss, batch_reg_loss, batch_cl_loss = \
-                model.create_set2set_loss(items, item_weights, user_embeddings, all_user_embeddins, ia_embeddings,
-                                        cl_loss_user, cl_loss_item)
-            
+            batch_mf_loss, batch_emb_loss, batch_reg_loss, batch_cl_loss = (
+                model.create_set2set_loss(
+                    items,
+                    item_weights,
+                    user_embeddings,
+                    all_user_embeddins,
+                    ia_embeddings,
+                    cl_loss_user,
+                    cl_loss_item,
+                )
+            )
+
             # 添加超图对比学习损失
-            batch_loss = batch_mf_loss + batch_emb_loss + batch_reg_loss + batch_cl_loss + cl_loss_hypergraph
+            batch_loss = (
+                batch_mf_loss
+                + batch_emb_loss
+                + batch_reg_loss
+                + batch_cl_loss
+                + cl_loss_hypergraph
+            )
             batch_loss.backward()
             optimizer.step()
 
@@ -155,7 +208,7 @@ if __name__ == '__main__':
             emb_loss += batch_emb_loss.item()
             reg_loss += batch_reg_loss.item()
             cl_loss += batch_cl_loss.item()
-            
+
             # 记录超图对比学习损失
             if isinstance(cl_loss_hypergraph, torch.Tensor):
                 hypergraph_cl_loss_total += cl_loss_hypergraph.item()
@@ -163,46 +216,78 @@ if __name__ == '__main__':
                 hypergraph_cl_loss_total += cl_loss_hypergraph
 
         if np.isnan(loss) == True:
-            print('ERROR: loss is nan.')
+            print("ERROR: loss is nan.")
             sys.exit()
 
         if (epoch + 1) % 10 != 0 and epoch != args.epoch - 1:
             if args.verbose > 0 and epoch % args.verbose == 0:
-                perf_str = 'Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]' % (
-                    epoch, time() - t1, loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total)
+                perf_str = (
+                    "Epoch %d [%.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]"
+                    % (
+                        epoch,
+                        time() - t1,
+                        loss,
+                        mf_loss,
+                        emb_loss,
+                        reg_loss,
+                        cl_loss,
+                        hypergraph_cl_loss_total,
+                    )
+                )
                 print(perf_str)
             continue
 
         t2 = time()
         group_to_test = data_generator.test_group_set
-        ret = test(model, list(data_generator.test_users), group_to_test, drop_flag=True)
+        ret = test(
+            model, list(data_generator.test_users), group_to_test, drop_flag=True
+        )
         t3 = time()
 
         loss_loger.append(loss)
-        rec_loger.append(ret['recall'])
-        pre_loger.append(ret['precision'])
-        f1_loger.append(ret['f1'])
-        rmrr_loger.append(ret['rmrr'])
+        rec_loger.append(ret["recall"])
+        pre_loger.append(ret["precision"])
+        f1_loger.append(ret["f1"])
+        rmrr_loger.append(ret["rmrr"])
 
         if args.verbose > 0:
-            perf_str = 'Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], ' \
-                      'precision=[%.5f, %.5f],  f1=[%.5f, %.5f], RMRR=[%.5f, %.5f]' % \
-                      (epoch, t2 - t1, t3 - t2, loss, mf_loss, emb_loss, reg_loss, cl_loss, hypergraph_cl_loss_total,
-                       ret['recall'][0], ret['recall'][-1], ret['precision'][0], ret['precision'][-1],
-                       ret['f1'][0], ret['f1'][-1], ret['rmrr'][0], ret['rmrr'][-1])
+            perf_str = (
+                "Epoch %d [%.1fs + %.1fs]: train==[%.5f=%.5f + %.5f + %.5f + %.5f + %.5f]\n recall=[%.5f, %.5f], "
+                "precision=[%.5f, %.5f],  f1=[%.5f, %.5f], RMRR=[%.5f, %.5f]"
+                % (
+                    epoch,
+                    t2 - t1,
+                    t3 - t2,
+                    loss,
+                    mf_loss,
+                    emb_loss,
+                    reg_loss,
+                    cl_loss,
+                    hypergraph_cl_loss_total,
+                    ret["recall"][0],
+                    ret["recall"][-1],
+                    ret["precision"][0],
+                    ret["precision"][-1],
+                    ret["f1"][0],
+                    ret["f1"][-1],
+                    ret["rmrr"][0],
+                    ret["rmrr"][-1],
+                )
+            )
             print(perf_str)
 
-        cur_best_pre_0, stopping_step, should_stop = no_early_stopping(ret['precision'][0], cur_best_pre_0,
-                                                                     stopping_step, expected_order='acc')
+        cur_best_pre_0, stopping_step, should_stop = no_early_stopping(
+            ret["precision"][0], cur_best_pre_0, stopping_step, expected_order="acc"
+        )
 
         if should_stop == True:
-            print('early stopping')
+            print("early stopping")
             break
 
-        if ret['precision'][0] == cur_best_pre_0 and args.save_flag == 1:
-            print("\n", "*" * 80, "model sava path", weights_save_path + 'model.pkl')
-            torch.save(model, weights_save_path + 'model.pkl')
-            print('save the weights in path: ', weights_save_path)
+        if ret["precision"][0] == cur_best_pre_0 and args.save_flag == 1:
+            print("\n", "*" * 80, "model sava path", weights_save_path + "model.pkl")
+            torch.save(model, weights_save_path + "model.pkl")
+            print("save the weights in path: ", weights_save_path)
 
     recs = np.array(rec_loger)
     pres = np.array(pre_loger)
@@ -211,28 +296,48 @@ if __name__ == '__main__':
 
     if len(rec_loger) == 0:
         print("No evaluation results available. Training completed without evaluation.")
-        endTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print('end ', endTime)
+        endTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print("end ", endTime)
         sys.exit()
 
     best_rec_0 = max(recs[:, 0])
     idx = list(recs[:, 0]).index(best_rec_0)
 
-    final_perf = "Best Iter=[%d]@[%.1f]\trecall=[%s], precision=[%s], f1=[%s], RMRR=[%s]" % \
-                (idx, time() - t0, '\t'.join(['%.5f' % r for r in recs[idx]]),
-                 '\t'.join(['%.5f' % r for r in pres[idx]]),
-                 '\t'.join(['%.5f' % r for r in f1s[idx]]),
-                 '\t'.join(['%.5f' % r for r in rmrr[idx]]))
+    final_perf = (
+        "Best Iter=[%d]@[%.1f]\trecall=[%s], precision=[%s], f1=[%s], RMRR=[%s]"
+        % (
+            idx,
+            time() - t0,
+            "\t".join(["%.5f" % r for r in recs[idx]]),
+            "\t".join(["%.5f" % r for r in pres[idx]]),
+            "\t".join(["%.5f" % r for r in f1s[idx]]),
+            "\t".join(["%.5f" % r for r in rmrr[idx]]),
+        )
+    )
     print(final_perf)
 
-    save_path = '%soutput/%s/%s.result-SMGCN-%d' % (args.proj_path, args.dataset, model.model_type, args.result_index)
+    save_path = "%soutput/%s/%s.result-SMGCN-%d" % (
+        args.proj_path,
+        args.dataset,
+        model.model_type,
+        args.result_index,
+    )
     ensureDir(save_path)
-    f = open(save_path, 'a')
+    f = open(save_path, "a")
     f.write(
-        'embed_size=%d, lr=%.4f, layer_size=%s, keep_prob=%s, regs=%s, loss_type=%s, adj_type=%s\n\t%s\n'
-        % (args.embed_size, args.lr, args.layer_size, args.keep_prob, args.regs,
-           args.loss_type, args.adj_type, final_perf))
+        "embed_size=%d, lr=%.4f, layer_size=%s, keep_prob=%s, regs=%s, loss_type=%s, adj_type=%s\n\t%s\n"
+        % (
+            args.embed_size,
+            args.lr,
+            args.layer_size,
+            args.keep_prob,
+            args.regs,
+            args.loss_type,
+            args.adj_type,
+            final_perf,
+        )
+    )
     f.close()
 
-    endTime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print('end ', endTime)
+    endTime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print("end ", endTime)
