@@ -527,7 +527,7 @@ class SMGCN(nn.Module):
 
                 # 计算用户嵌入
                 sum_embeddings = torch.matmul(users, u_g_embeddings)
-                normal_matrix = torch.reciprocal(torch.sum(users, 1).clamp_min(1.0))
+                normal_matrix = torch.reciprocal(torch.sum(users, 1))
                 normal_matrix = normal_matrix.unsqueeze(1)
                 extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
                 user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)

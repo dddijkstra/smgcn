@@ -56,9 +56,10 @@ def test(model, users_to_test, test_group_list, drop_flag=False):
 
     index = 0
     for entry in user_batch_rating_uid:
-        # 将每个用户的评分向量安全地转换为Python列表，避免 requires_grad=True 的警告
-        vals = entry[1].detach().cpu().tolist()
-        temp = list(enumerate(vals))
+        rating = entry[1]  # (1, 753)
+        # print("@@@@@@@@@@@@rating@@@@@@@@")
+        # print(rating)
+        temp = [(i, float(rating[i])) for i in range(len(rating))]
         user_rating_dict[index] = temp
         index += 1
     # user_rating_dict {sym-1: [(herb1, rate), (herb2, rate), ..., (herb753, rate)], ...,
