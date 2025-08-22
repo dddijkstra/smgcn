@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # @Time    : 2024/01/15 11:00
-# @Author  : Assistant
 # @File    : HerbHyperGraphNet.py
 # @Description : 专门用于草药推荐的超图卷积神经网络
 
@@ -9,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from scipy.sparse import coo_matrix
-import math
 from .HyperGraphConv import HyperGraphConvolution, HyperGraphNeuralNetwork, HyperGraphBuilder
 
 class HerbHyperGraphConv(nn.Module):
@@ -242,7 +240,7 @@ class HerbHyperGraphNet(nn.Module):
         values = torch.FloatTensor(L_coo.data)
         shape = L_coo.shape
         
-        return torch.sparse.FloatTensor(indices, values, shape)
+        return torch.sparse_coo_tensor(indices, values, shape)
     
     def forward(self, user_ids, item_ids, hypergraph_adj, train=True):
         """
@@ -369,7 +367,7 @@ if __name__ == "__main__":
     item_ids = torch.randint(0, config['n_items'], (32,))
     
     # 模拟超图邻接矩阵
-    hypergraph_adj = torch.sparse.FloatTensor(
+    hypergraph_adj = torch.sparse_coo_tensor(
         torch.LongTensor([[0, 1], [1, 0]]),
         torch.FloatTensor([1.0, 1.0]),
         (config['n_items'], config['n_items'])

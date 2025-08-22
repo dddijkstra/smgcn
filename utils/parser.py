@@ -17,7 +17,7 @@ def parse_args():
 
     parser.add_argument('--result_index', type=int, default=1,
                         help='result file index.')
-    parser.add_argument('--test_file', nargs='?', default='valid_id.txt',
+    parser.add_argument('--test_file', nargs='?', default='test.txt',
                         help='valid_5percent.txt')
 
     parser.add_argument('--result_label', nargs='?', default='',
@@ -28,7 +28,7 @@ def parse_args():
 
 
     parser.add_argument('--dataset', nargs='?', default='Herb',
-                        help='Choose a dataset from {Herb, NetEase, gowalla, yelp2018, amazon-book}')
+                        help='Choose a dataset from {Herb, NetEase, KG, gowalla, yelp2018, amazon-book}')
     parser.add_argument('--pretrain', type=int, default=0,
                         help='0: No pretrain, -1: Pretrain with the learned embeddings, 1:Pretrain with stored models.')
     parser.add_argument('--verbose', type=int, default=1,

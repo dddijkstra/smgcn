@@ -69,8 +69,9 @@ echo "开始训练..." | tee -a $log_file
 echo "执行命令: python -u main.py --dataset $DATASET --embed_size $EMBED_SIZE --layer_size '$LAYER_SIZE' --lr $LR --batch_size $BATCH_SIZE --epoch $EPOCH --verbose $VERBOSE --gpu_id $GPU_ID" | tee -a $log_file
 echo "开始时间: $(date)" | tee -a $log_file
 echo "================================" | tee -a $log_file
-
-# 执行训练命令并将输出追加到日志文件
+#################################
+# 执行训练命令并将输出追加到日志文件 ##
+#################################
 python -u main.py --dataset "$DATASET" --embed_size "$EMBED_SIZE" --layer_size "$LAYER_SIZE" --lr "$LR" --batch_size "$BATCH_SIZE" --epoch "$EPOCH" --verbose "$VERBOSE" --gpu_id "$GPU_ID" 2>&1 | tee -a $log_file
 
 echo "" | tee -a $log_file

@@ -91,8 +91,13 @@ class Data(object):
                 item_freq_max = self.item_weights.max()
                 print('item_freq_max ', item_freq_max)
                 print(self.item_weights.shape[0], ' ', self.item_weights.shape[1])
-                for index in range(self.item_weights.shape[0]):
-                    self.item_weights[index][0] = item_freq_max * 1.0 / self.item_weights[index][0]
+                # 避免除零：对未在训练集中出现的草药（频次为0）赋0权重，其他为 max_freq / freq
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    self.item_weights = np.where(
+                        self.item_weights > 0,
+                        item_freq_max / self.item_weights,
+                        0.0,
+                    )
 
                 test_index = 0
                 for l in f_test.readlines():

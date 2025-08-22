@@ -4,17 +4,12 @@
 # @File    : SMGCN.py
 # @Description :  the pytorch version of SMGCN
 
-import os
-import sys
-from utils.helper import *
-from utils.batch_test import *
-import datetime
-import numpy as np
-import torch.nn as nn
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torch.autograd import Variable
+
+from utils.batch_test import args
+
 
 class SMGCN(nn.Module):
     def __init__(self, data_config, pretrain_data):
@@ -149,9 +144,10 @@ class SMGCN(nn.Module):
     
     def build_hypergraph_from_train_data(self):
         """从训练数据构建超图"""
-        import torch
-        import numpy as np
         from collections import defaultdict
+
+        import numpy as np
+        import torch
         
         # 创建超边
         hyperedges = []
@@ -192,8 +188,8 @@ class SMGCN(nn.Module):
     
     def _compute_hypergraph_laplacian(self, H):
         """计算超图拉普拉斯矩阵"""
-        import torch
         import numpy as np
+        import torch
         
         # 计算节点度矩阵 D_v
         d_v = np.sum(H, axis=1)
@@ -327,7 +323,7 @@ class SMGCN(nn.Module):
         v = torch.from_numpy(coo.data).float().to(args.device)
         # coo = X.tocoo().astype(np.float32)
         # indices = np.mat([coo.row, coo.col]).transpose()
-        return torch.sparse.FloatTensor(i, v, coo.shape)
+        return torch.sparse_coo_tensor(i, v, coo.shape)
 
     # todo: debug check function
     def _split_A_hat(self, X):
@@ -531,7 +527,7 @@ class SMGCN(nn.Module):
 
                 # 计算用户嵌入
                 sum_embeddings = torch.matmul(users, u_g_embeddings)
-                normal_matrix = torch.reciprocal(torch.sum(users, 1))
+                normal_matrix = torch.reciprocal(torch.sum(users, 1).clamp_min(1.0))
                 normal_matrix = normal_matrix.unsqueeze(1)
                 extend_normal_embeddings = normal_matrix.repeat(1, sum_embeddings.shape[1])
                 user_embeddings = torch.mul(sum_embeddings, extend_normal_embeddings)
